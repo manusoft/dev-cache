@@ -4,32 +4,89 @@ namespace DevCache;
 
 public sealed class InMemoryStore
 {
-    private readonly ConcurrentDictionary<string, string> _data = new(StringComparer.OrdinalIgnoreCase);
+    private sealed class ValueEntry
+    {
+        public string Value;
+        public DateTime? Expiry; // UTC time
+    }
+
+    private readonly ConcurrentDictionary<string, ValueEntry> _data =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    public InMemoryStore()
+    {
+        Task.Run(async () =>
+        {
+            while (true)
+            {
+                try
+                {
+                    var now = DateTime.UtcNow;
+                    foreach (var key in _data.Keys)
+                    {
+                        if (_data.TryGetValue(key, out var entry) &&
+                            entry.Expiry.HasValue &&
+                            entry.Expiry.Value <= now)
+                        {
+                            _data.TryRemove(key, out _);
+                        }
+                    }
+                }
+                catch { /* ignore */ }
+
+                await Task.Delay(1000);
+            }
+        });
+    }
 
     public bool Set(string key, string value)
     {
-        _data[key] = value;
+        _data[key] = new ValueEntry { Value = value, Expiry = null };
         return true;
     }
 
     public string? Get(string key)
     {
-        _data.TryGetValue(key, out var value);
-        return value;
+        if (!_data.TryGetValue(key, out var entry))
+            return null;
+
+        if (entry.Expiry.HasValue && entry.Expiry.Value <= DateTime.UtcNow)
+        {
+            _data.TryRemove(key, out _);
+            return null;
+        }
+
+        return entry.Value;
     }
 
-    public bool Del(string key)
-    {
-        return _data.TryRemove(key, out _);
-    }
+    public bool Del(string key) => _data.TryRemove(key, out _);
 
     public bool Exists(string key)
     {
-        return _data.ContainsKey(key);
+        var entry = Get(key);
+        return entry != null;
     }
 
-    public void FlushAll()
+    public void FlushAll() => _data.Clear();
+
+    public bool Expire(string key, int seconds)
     {
-        _data.Clear();
+        if (!_data.TryGetValue(key, out var entry))
+            return false;
+
+        entry.Expiry = DateTime.UtcNow.AddSeconds(seconds);
+        return true;
+    }
+
+    public long TTL(string key)
+    {
+        if (!_data.TryGetValue(key, out var entry))
+            return -2; // key does not exist
+
+        if (!entry.Expiry.HasValue)
+            return -1; // key exists but no expiry
+
+        var ttl = (long)(entry.Expiry.Value - DateTime.UtcNow).TotalSeconds;
+        return ttl > 0 ? ttl : -2; // expired
     }
 }

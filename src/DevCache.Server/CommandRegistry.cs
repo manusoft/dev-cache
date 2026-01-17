@@ -20,7 +20,9 @@ public static class CommandRegistry
             ["GET"] = GetAsync,
             ["DEL"] = DelAsync,
             ["EXISTS"] = ExistsAsync,
-            ["FLUSHDB"] = FlushDbAsync
+            ["FLUSHDB"] = FlushDbAsync,
+            ["EXPIRE"] = ExpireAsync,
+            ["TTL"] = TtlAsync,
         };
     }
 
@@ -121,5 +123,36 @@ public static class CommandRegistry
         await ctx.Writer.WriteAsync(ctx.Stream, RespValue.Simple("OK"));
     }
 
+    private static async Task ExpireAsync(CommandContext ctx, IReadOnlyList<string> args)
+    {
+        if (args.Count != 2)
+        {
+            await ctx.Writer.WriteAsync(ctx.Stream,
+                RespValue.Error("ERR wrong number of arguments for 'expire' command"));
+            return;
+        }
 
+        if (!int.TryParse(args[1], out var seconds) || seconds < 0)
+        {
+            await ctx.Writer.WriteAsync(ctx.Stream,
+                RespValue.Error("ERR invalid expire time"));
+            return;
+        }
+
+        var result = Store.Expire(args[0], seconds) ? 1L : 0L;
+        await ctx.Writer.WriteAsync(ctx.Stream, RespValue.Integer(result));
+    }
+
+    private static async Task TtlAsync(CommandContext ctx, IReadOnlyList<string> args)
+    {
+        if (args.Count != 1)
+        {
+            await ctx.Writer.WriteAsync(ctx.Stream,
+                RespValue.Error("ERR wrong number of arguments for 'ttl' command"));
+            return;
+        }
+
+        var ttl = Store.TTL(args[0]);
+        await ctx.Writer.WriteAsync(ctx.Stream, RespValue.Integer(ttl));
+    }
 }
