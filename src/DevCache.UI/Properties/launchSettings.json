@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "DevCache.UI (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "DevCache.UI (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

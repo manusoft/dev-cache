@@ -1,10 +1,12 @@
 <Solution>
   <Folder Name="/src/">
-    <Project Path="src/DevCache.Persistence/DevCache.Persistence.csproj" Id="9b816e7d-d987-448b-8d5c-a1b1436c0d18" />
-    <Project Path="src/DevCache.Protocol/DevCache.Protocol.csproj" Id="38b82434-d75e-43f1-bbaa-64ad0d551fa1" />
+    <Project Path="src/DevCache.Core/DevCache.Core.csproj" />
     <Project Path="src/DevCache.Server/DevCache.Server.csproj" Id="7081d44c-5e07-4605-bac2-73fbf12a0c7b" />
-    <Project Path="src/DevCache.Shared/DevCache.Shared.csproj" Id="7b22f7f3-7967-4c8e-9b0c-001a6b52b233" />
-    <Project Path="src/DevCache.Storage/DevCache.Storage.csproj" Id="c9a8a20d-f052-4290-a08b-1187e4c0ed95" />
+    <Project Path="src/DevCache.Service/DevCache.Service.csproj" Id="64191405-e5b5-4f53-b07c-373581b52cbb" />
+    <Project Path="src/DevCache.UI/DevCache.UI.csproj" Id="2194a7f5-6059-4bbc-92f1-efd3ddcd57e3">
+      <Platform Project="x64" />
+      <Deploy />
+    </Project>
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/DevCache.Tests/DevCache.Tests.csproj" Id="3c53b764-310f-4731-8ad6-6fe87a460b04" />

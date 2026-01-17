@@ -6,7 +6,7 @@ public sealed class InMemoryStore
 {
     private sealed class ValueEntry
     {
-        public string Value;
+        public string Value = default!;
         public DateTime? Expiry; // UTC time
     }
 
@@ -89,4 +89,13 @@ public sealed class InMemoryStore
         var ttl = (long)(entry.Expiry.Value - DateTime.UtcNow).TotalSeconds;
         return ttl > 0 ? ttl : -2; // expired
     }
+
+    public IReadOnlyDictionary<string, string> GetAllKeys()
+    {
+        var now = DateTime.UtcNow;
+        return _data
+            .Where(kvp => kvp.Value.Expiry == null || kvp.Value.Expiry > now)
+            .ToDictionary(kvp => kvp.Key, kvp => kvp.Value.Value, StringComparer.OrdinalIgnoreCase);
+    }
+
 }
