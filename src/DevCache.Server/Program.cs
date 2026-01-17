@@ -41,19 +41,38 @@ static async Task HandleClientAsync(TcpClient client)
             }
 
             var items = (IReadOnlyList<RespValue>)request.Value!;
-            var command = ((string?)items[0].Value)?.ToUpperInvariant();
+            var commandName = ((string?)items[0].Value)?.ToUpperInvariant();
 
-            if (command == "PING")
-            {
-                await writer.WriteAsync(stream, RespValue.Simple("PONG"));
-            }
-            else
+            Console.WriteLine($"Command Received: {commandName}");
+
+            if (string.IsNullOrWhiteSpace(commandName))
             {
                 await writer.WriteAsync(stream,
-                    RespValue.Error($"Unknown command '{command}'"));
+                    RespValue.Error("ERR empty command"));
+                continue;
             }
 
-            Console.WriteLine($"Command received: {command}");
+            var args = items
+                .Skip(1)
+                .Select(v => (string?)v.Value ?? string.Empty)
+                .ToList();
+
+            if (!CommandRegistry.TryGet(commandName, out var command))
+            {
+                await writer.WriteAsync(stream,
+                    RespValue.Error($"ERR unknown command '{commandName}'"));
+                continue;
+            }
+
+            var context = new CommandContext
+            {
+                Client = client,
+                Stream = stream,
+                Writer = writer
+            };
+
+            await command(context, args);
+
         }
     }
     catch (Exception ex)
