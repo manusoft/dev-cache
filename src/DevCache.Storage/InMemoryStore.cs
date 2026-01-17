@@ -41,7 +41,7 @@ public sealed class InMemoryStore
 
     public bool Set(string key, string value)
     {
-        _data[key] = new ValueEntry { Value = value, Expiry = null };
+         _data[key] = new ValueEntry { Value = value, Expiry = null };
         return true;
     }
 

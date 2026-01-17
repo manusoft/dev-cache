@@ -23,6 +23,7 @@ public static class CommandRegistry
             ["FLUSHDB"] = FlushDbAsync,
             ["EXPIRE"] = ExpireAsync,
             ["TTL"] = TtlAsync,
+            ["FLUSHDB"] = FlushDbAsync
         };
     }
 
@@ -155,4 +156,5 @@ public static class CommandRegistry
         var ttl = Store.TTL(args[0]);
         await ctx.Writer.WriteAsync(ctx.Stream, RespValue.Integer(ttl));
     }
+
 }
