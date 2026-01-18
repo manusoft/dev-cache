@@ -5,8 +5,6 @@ using System.Net.Sockets;
 
 internal class Program
 {
-    private static readonly string LogFile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "devcache.log");
-
     private static async Task Main(string[] args)
     {
         bool background = args.Contains("--background", StringComparer.OrdinalIgnoreCase);
@@ -144,7 +142,7 @@ internal class Program
         }
     }
 
-    // Very simple dual logger (console + file)
+    // Very simple logger (console)
     private static ILogger CreateSimpleLogger(bool background)
     {
         var factory = LoggerFactory.Create(builder =>

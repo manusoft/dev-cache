@@ -4,7 +4,6 @@ using DevCache.UI.Views;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Diagnostics;
 using System.Net.Sockets;
 using System.Threading.Tasks;
 
@@ -35,14 +34,18 @@ public partial class MainViewModel : ObservableObject
     private string valueText;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(EditTitle))]
-    private bool isEditingKey;  // optional – just for title/text changes
+    [NotifyPropertyChangedFor(nameof(IsExpiryMode))]
+    private bool isNewOrEditMode;
 
     [ObservableProperty]
     private int expireSeconds = 3600;  // default 1 hour
 
-    public string EditTitle => IsEditingKey ? "Edit Key" : "New Key";
+    [ObservableProperty]
+    public bool isPaneOpen = false;
+
     public bool HasSelectedEntry => SelectedEntry != null;
+
+    public bool IsExpiryMode => !IsNewOrEditMode;
 
     public MainViewModel()
     {
@@ -52,15 +55,73 @@ public partial class MainViewModel : ObservableObject
         _ = RefreshAsync(); // initial load
     }
 
-    partial void OnKeyTextChanged(string value)
+
+    [RelayCommand]
+    private async Task ClosePane()
     {
-        KeyText = value.Trim();
+        SelectedEntry = null;
+        IsPaneOpen = false;
     }
 
-    partial void OnValueTextChanged(string value)
+    [RelayCommand]
+    private async Task AddKey()
     {
-        ValueText = value.Trim();
+        SelectedEntry = null;
+        //IsPaneOpen = true;
     }
+
+    partial void OnSelectedEntryChanged(CacheEntryViewModel? value)
+    {
+        if (value != null && !string.IsNullOrEmpty(value.Key)) // Edit mode
+        {
+            IsPaneOpen = true;
+            IsNewOrEditMode = true;
+            KeyText = value.Key;
+            _ = LoadValueAsync(value);
+            return;
+        }
+        else // New mode
+        {
+            IsPaneOpen = true;
+            IsNewOrEditMode = true;
+            KeyText = "";
+            ValueText = "";
+        }
+    }
+
+    private async Task LoadValueAsync(CacheEntryViewModel? entry)
+    {
+        if (entry == null) return;
+
+        try
+        {
+            using var client = new TcpClient(Host, Port);
+            using var stream = client.GetStream();
+            var writer = new RespWriter();
+            var reader = new RespReader(stream);
+
+            await writer.WriteAsync(stream, RespValue.Array(new[]
+            {
+                RespValue.Bulk("GET"),
+                RespValue.Bulk(entry.Key)
+            }));
+
+            var resp = await reader.ReadAsync();
+            entry.Value = resp?.Type switch
+            {
+                RespType.Bulk => (string?)resp.Value,
+                RespType.Null => "(nil)",
+                _ => "(error)"
+            };
+
+            ValueText = entry.Value ?? "(connection error)";
+        }
+        catch
+        {
+            entry.Value = "(connection error)";
+        }
+    }
+
 
     partial void OnExpireSecondsChanged(int value)
     {
@@ -71,8 +132,6 @@ public partial class MainViewModel : ObservableObject
     private void OpenExpireTip()
     {
         ExpireSeconds = 3600; // reset to default each time, or keep last used
-        Status = "Setting expiration for selected key...";
-        // Tip opening is handled in code-behind
     }
 
 
@@ -146,8 +205,6 @@ public partial class MainViewModel : ObservableObject
         IsBusy = true;
         Status = "Loading keys...";
 
-        Debug.WriteLine("UI → Sending KEYS command");  // ← add this
-
         try
         {
             Entries.Clear();
@@ -158,8 +215,6 @@ public partial class MainViewModel : ObservableObject
             var writer = new RespWriter();
             var reader = new RespReader(stream);
 
-            Debug.WriteLine("UI → Writing KEYS *");  // ← add
-
             // Send KEYS *
             await writer.WriteAsync(stream, RespValue.Array(new[]
             {
@@ -168,7 +223,6 @@ public partial class MainViewModel : ObservableObject
             }));
 
             var response = await reader.ReadAsync();
-            Debug.WriteLine($"UI → Received response type: {response?.Type}");  // ← very useful
             if (response?.Type != RespType.Array) throw new Exception("Invalid KEYS response");
 
             var keys = (IReadOnlyList<RespValue>)response.Value!;
@@ -207,7 +261,6 @@ public partial class MainViewModel : ObservableObject
         catch (Exception ex)
         {
             Status = $"Error: {ex.Message}";
-            Debug.WriteLine($"UI → Refresh failed: {ex.Message}");
         }
         finally
         {
@@ -215,51 +268,9 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    partial void OnSelectedEntryChanged(CacheEntryViewModel? value)
-    {
-        if (value != null)
-        {
-            KeyText = value.Key;
-            ValueText = value.Value ?? "";
-            IsEditingKey = true;
-        }
-        else
-        {
-            KeyText = "";
-            ValueText = "";
-            IsEditingKey = false;
-        }
 
-        _ = LoadValueAsync(value);
-    }
 
-    private async Task LoadValueAsync(CacheEntryViewModel? entry)
-    {
-        if (entry == null) return;
 
-        try
-        {
-            using var client = new TcpClient(Host, Port);
-            using var stream = client.GetStream();
-            var writer = new RespWriter();
-            var reader = new RespReader(stream);
-
-            await writer.WriteAsync(stream, RespValue.Array(new[]
-            {
-                RespValue.Bulk("GET"),
-                RespValue.Bulk(entry.Key)
-            }));
-
-            var resp = await reader.ReadAsync();
-            entry.Value = resp?.Type switch
-            {
-                RespType.Bulk => (string?)resp.Value,
-                RespType.Null => "(nil)",
-                _ => "(error)"
-            };
-        }
-        catch { entry.Value = "(connection error)"; }
-    }
 
 
     [RelayCommand]
@@ -357,6 +368,7 @@ public partial class MainViewModel : ObservableObject
         }
         finally
         {
+            IsPaneOpen = false;
             KeyText = string.Empty;
             ValueText = string.Empty;
             IsBusy = false;
@@ -387,7 +399,7 @@ public partial class MainViewModel : ObservableObject
             var response = await reader.ReadAsync();
             if (response?.Type == RespType.Integer && (long)response.Value! == 1)
             {
-               SelectedEntry = null; // clear selection
+                SelectedEntry = null; // clear selection
             }
             else
             {
@@ -405,5 +417,4 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    // Add more commands: SetKey, DeleteKey, ExpireKey ...
 }

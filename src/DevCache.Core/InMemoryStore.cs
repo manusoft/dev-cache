@@ -6,6 +6,10 @@ namespace DevCache;
 
 public sealed class InMemoryStore : IDisposable
 {
+    private const long AUTO_REWRITE_MIN_SIZE_BYTES = 64 * 1024;      // 64 KB minimum size to consider rewrite
+    private const int AUTO_REWRITE_GROWTH_PERCENT = 100;             // rewrite when file >= 100% larger than last rewrite
+    private long _lastRewriteSize = 0;                               // track size after last rewrite
+
     // =======================
     // Core Storage
     // =======================
@@ -28,22 +32,14 @@ public sealed class InMemoryStore : IDisposable
         }
     }
 
-    // =======================
-    // AOF Persistence
-    // =======================
     private readonly string _aofPath;
     private StreamWriter? _aofWriter;
     private readonly object _aofLock = new();
-
-    // =======================
-    // Expiry Loop
-    // =======================
+    
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _expiryTask;
+    private Task? _rewriteTask;
 
-    // =======================
-    // Constructor
-    // =======================
     public InMemoryStore()
     {
         _aofPath = Path.Combine(
@@ -60,6 +56,7 @@ public sealed class InMemoryStore : IDisposable
         OpenAofWriter();
 
         _expiryTask = Task.Run(ExpiryLoop, _cts.Token);
+        _rewriteTask = Task.Run(AofRewriteMonitorLoop, _cts.Token);
     }
 
     // =======================
@@ -251,6 +248,121 @@ public sealed class InMemoryStore : IDisposable
         }
     }
 
+    private async Task AofRewriteMonitorLoop()
+    {
+        while (!_cts.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(10000, _cts.Token); // check every 10 seconds
+
+                if (!File.Exists(_aofPath)) continue;
+
+                var fileInfo = new FileInfo(_aofPath);
+                long currentSize = fileInfo.Length;
+
+                // Skip if file is still small
+                if (currentSize < AUTO_REWRITE_MIN_SIZE_BYTES) continue;
+
+                // Trigger if file grew by X% since last rewrite
+                bool shouldRewrite =
+                    _lastRewriteSize == 0 ||
+                    currentSize >= _lastRewriteSize * (1 + AUTO_REWRITE_GROWTH_PERCENT / 100.0);
+
+                if (shouldRewrite)
+                {
+                    Debug.WriteLine($"[AOF] Rewrite triggered – current size: {currentSize / 1024} KB, last rewrite: {_lastRewriteSize / 1024} KB");
+                    await RewriteAofAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[AOF Rewrite Monitor] {ex.Message}");
+            }
+        }
+    }
+
+    private async Task RewriteAofAsync()
+    {
+        lock (_aofLock)
+        {
+            if (_aofWriter != null)
+            {
+                _aofWriter.Flush();
+                _aofWriter.Dispose();
+                _aofWriter = null;
+            }
+        }
+
+        string tempPath = _aofPath + ".rewrite.tmp";
+
+        try
+        {
+            // 1. Get current snapshot (safely)
+            var currentData = _data.ToArray(); // snapshot
+
+            // 2. Write new compact AOF
+            using (var tempFs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+            using (var tempWriter = new StreamWriter(tempFs, Encoding.UTF8))
+            {
+                tempWriter.WriteLine($"# DevCache AOF rewritten {DateTime.UtcNow:o}");
+
+                foreach (var kvp in currentData)
+                {
+                    var entry = kvp.Value;
+
+                    // Skip expired entries
+                    if (entry.ExpiryUtc.HasValue && entry.ExpiryUtc <= DateTime.UtcNow)
+                        continue;
+
+                    // Write SET command in RESP format
+                    var args = new[] { "SET", kvp.Key, entry.Value };
+                    tempWriter.WriteLine($"*{args.Length}");
+                    foreach (var arg in args)
+                    {
+                        int byteLen = Encoding.UTF8.GetByteCount(arg);
+                        tempWriter.WriteLine($"${byteLen}");
+                        tempWriter.WriteLine(arg);
+                    }
+
+                    // Optional: write EXPIRE if it has TTL
+                    if (entry.ExpiryUtc.HasValue)
+                    {
+                        long ttlSec = (long)(entry.ExpiryUtc.Value - DateTime.UtcNow).TotalSeconds;
+                        if (ttlSec > 0)
+                        {
+                            var expireArgs = new[] { "EXPIRE", kvp.Key, ttlSec.ToString() };
+                            tempWriter.WriteLine($"*{expireArgs.Length}");
+                            foreach (var arg in expireArgs)
+                            {
+                                int byteLen = Encoding.UTF8.GetByteCount(arg);
+                                tempWriter.WriteLine($"${byteLen}");
+                                tempWriter.WriteLine(arg);
+                            }
+                        }
+                    }
+                }
+
+                await tempWriter.FlushAsync();
+            }
+
+            // 3. Atomic replace
+            lock (_aofLock)
+            {
+                File.Move(tempPath, _aofPath, overwrite: true);
+                _lastRewriteSize = new FileInfo(_aofPath).Length;
+                OpenAofWriter(); // reopen writer
+            }
+
+            Debug.WriteLine($"[AOF] Rewrite completed – new size: {_lastRewriteSize / 1024} KB");
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[AOF Rewrite] Failed: {ex.Message}");
+            if (File.Exists(tempPath)) File.Delete(tempPath);
+            OpenAofWriter(); // recover writer
+        }
+    }
 
     // =======================
     // Commands
@@ -389,6 +501,7 @@ public sealed class InMemoryStore : IDisposable
         _cts.Cancel();
 
         try { _expiryTask.Wait(2000); } catch { }
+        try { _rewriteTask?.Wait(2000); } catch { }
 
         lock (_aofLock)
         {

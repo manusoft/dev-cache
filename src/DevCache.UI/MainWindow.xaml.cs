@@ -22,10 +22,10 @@ public sealed partial class MainWindow : Window
     private void CreateAppWindow()
     {
         // Set the window title
-        AppWindow.Title = "DevCache Monitor";
+        AppWindow.Title = "DevCache Explorer";
 
         // Set the window size (including borders)
-        AppWindow.Resize(new Windows.Graphics.SizeInt32(800, 600));
+        AppWindow.Resize(new Windows.Graphics.SizeInt32(1200, 800));
 
         // Set the taskbar icon (displayed in the taskbar)
         //AppWindow.SetIcon("Assets/Tiles/GalleryIcon.ico");
@@ -41,10 +41,10 @@ public sealed partial class MainWindow : Window
         AppWindow.TitleBar.PreferredTheme = TitleBarTheme.UseDefaultAppMode;
 
         OverlappedPresenter presenter = OverlappedPresenter.Create();
-        presenter.PreferredMinimumWidth = 800;
-        presenter.PreferredMinimumHeight = 600;
-        presenter.PreferredMaximumWidth = 800;
-        presenter.PreferredMaximumHeight = 600;
+        presenter.PreferredMinimumWidth = 1200;
+        presenter.PreferredMinimumHeight = 800;
+        presenter.PreferredMaximumWidth = 1200;
+        presenter.PreferredMaximumHeight = 800;
         presenter.IsMaximizable = false;
 
         AppWindow.SetPresenter(presenter);

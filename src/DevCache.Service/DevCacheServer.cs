@@ -5,13 +5,15 @@ namespace DevCache.Service;
 
 public sealed class DevCacheServer : IDisposable
 {
+    private readonly ILogger _logger;
     private readonly IConfiguration _config;
     private TcpListener? _listener;
     private readonly InMemoryStore _store = new();
 
-    public DevCacheServer(IConfiguration config)
+    public DevCacheServer(IConfiguration config, ILogger logger)
     {
         _config = config;
+        _logger =logger;
         CommandRegistry.Initialize(_store);
     }
 
@@ -23,7 +25,7 @@ public sealed class DevCacheServer : IDisposable
         _listener = new TcpListener(IPAddress.Parse(bind), port);
         _listener.Start();
 
-        Console.WriteLine("DevCache listening on 127.0.0.1:6380");
+        _logger.LogInformation("DevCache listening on 127.0.0.1:6380");
 
         while (!token.IsCancellationRequested)
         {
@@ -50,8 +52,7 @@ public sealed class DevCacheServer : IDisposable
                 // Expect array: [command, arg1, arg2...]
                 if (request.Type != RespType.Array)
                 {
-                    //if (!runInBackground)
-                        Console.WriteLine("Protocol error: expected array");
+                    _logger.LogError("Protocol error: expected array");
 
                     await writer.WriteAsync(stream,
                         RespValue.Error("Protocol error: expected array"));
@@ -61,8 +62,7 @@ public sealed class DevCacheServer : IDisposable
                 var items = (IReadOnlyList<RespValue>)request.Value!;
                 var commandName = ((string?)items[0].Value)?.ToUpperInvariant();
 
-                //if (!runInBackground)
-                    Console.WriteLine($"Command Received: {commandName}");
+                _logger.LogInformation($"Command Received: {commandName}");
 
                 if (string.IsNullOrWhiteSpace(commandName))
                 {
@@ -96,8 +96,7 @@ public sealed class DevCacheServer : IDisposable
         }
         catch (Exception ex)
         {
-            //if (!runInBackground)
-                Console.WriteLine($"Client error: {ex.Message}");
+            _logger.LogCritical($"Client error: {ex.Message}");
         }
         finally
         {

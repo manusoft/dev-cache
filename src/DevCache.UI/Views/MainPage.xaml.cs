@@ -58,5 +58,24 @@ namespace DevCache.UI.Views
             ViewModel.ExpireSeconds = 3600; // reset default
         }
 
+        private void KeyGrid_DoubleTapped(object sender, Microsoft.UI.Xaml.Input.DoubleTappedRoutedEventArgs e)
+        {
+            //ShowKeyTeachingTip.IsOpen = true;
+        }
+
+        private void FlushAllButton_Click(object sender, RoutedEventArgs e)
+        {
+            FlushAllTeachingTip.IsOpen = true;
+        }
+
+        private void FlushAllTeachingTip_ActionButtonClick(TeachingTip sender, object args)
+        {
+            FlushAllTeachingTip.IsOpen = false;
+        }
+
+        private void ClosePane_Click(object sender, RoutedEventArgs e)
+        {
+
+        }
     }
 }
