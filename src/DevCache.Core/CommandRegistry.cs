@@ -85,9 +85,6 @@ public static class CommandRegistry
         // This line ensures previous expiry is cleared — critical for Redis compatibility
         Store.Set(key, value);
 
-        // Append to AOF
-        Store.AppendToAof($"SET {EscapeForAof(key)} {EscapeForAof(value)}");
-
         await ctx.Writer.WriteAsync(ctx.Stream, RespValue.Simple("OK"));
     }
 
@@ -113,9 +110,6 @@ public static class CommandRegistry
             await Error(ctx, "ERR wrong number of arguments for 'del' command");
             return;
         }
-
-        int count = Store.Del(args[0]) ? 1 : 0;
-        Store.AppendToAof($"DEL {EscapeForAof(args[0])}");
 
         await ctx.Writer.WriteAsync(
             ctx.Stream,
@@ -150,10 +144,6 @@ public static class CommandRegistry
             return;
         }
 
-        bool success = Store.Expire(args[0], seconds);
-        if (success)
-            Store.AppendToAof($"EXPIRE {EscapeForAof(args[0])} {seconds}");
-
         await ctx.Writer.WriteAsync(
             ctx.Stream,
             RespValue.Integer(Store.Expire(args[0], seconds) ? 1 : 0));
@@ -182,7 +172,6 @@ public static class CommandRegistry
         }
 
         Store.FlushAll();
-        Store.AppendToAof("FLUSHDB");
         await Ok(ctx);
     }
 
