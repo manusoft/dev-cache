@@ -357,6 +357,8 @@ public partial class MainViewModel : ObservableObject
         }
         finally
         {
+            KeyText = string.Empty;
+            ValueText = string.Empty;
             IsBusy = false;
         }
     }

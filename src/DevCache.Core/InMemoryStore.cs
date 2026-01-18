@@ -91,67 +91,232 @@ public sealed class InMemoryStore : IDisposable
     {
         if (!File.Exists(_aofPath))
         {
-            Debug.WriteLine("[AOF] No existing file");
+            Debug.WriteLine("[AOF] No file");
             return;
         }
 
-        Debug.WriteLine("[AOF] Loading...");
+        Debug.WriteLine("[AOF] Loading RESP format...");
 
-        using var reader = new StreamReader(
-            new FileStream(
-                _aofPath,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.ReadWrite   // ✅ FIX: no file lock
-            )
-        );
+        int loaded = 0;
 
-        string? line;
-        while ((line = reader.ReadLine()) != null)
+        using var fs = new FileStream(_aofPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = new StreamReader(fs, Encoding.UTF8);
+
+        while (!reader.EndOfStream)
         {
-            ReplayCommand(line);
-        }
+            string? line = reader.ReadLine();
+            if (line == null) break;
 
-        Debug.WriteLine($"[AOF] Load complete ({_data.Count} keys)");
-    }
+            line = line.Trim();
+            if (string.IsNullOrEmpty(line) || line.StartsWith("#")) continue;
 
-    private void ReplayCommand(string line)
-    {
-        if (string.IsNullOrWhiteSpace(line) || line.StartsWith("#"))
-            return;
+            if (!line.StartsWith("*")) continue;
 
-        var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length < 2) return;
+            if (!int.TryParse(line.Substring(1), out int argCount) || argCount < 1) continue;
 
-        var cmd = parts[0].ToUpperInvariant();
+            var commandArgs = new List<string>(argCount);
+            bool valid = true;
 
-        try
-        {
-            switch (cmd)
+            for (int i = 0; i < argCount && valid; i++)
             {
-                case "SET":
-                    Set(parts[1], string.Join(" ", parts[2..]), persist: false);
-                    break;
+                string? lenLine = reader.ReadLine();
+                if (lenLine == null || !lenLine.StartsWith("$"))
+                {
+                    valid = false;
+                    continue;
+                }
 
-                case "DEL":
-                    Del(parts[1], persist: false);
-                    break;
+                if (!int.TryParse(lenLine.Substring(1), out int len))
+                {
+                    valid = false;
+                    continue;
+                }
 
-                case "EXPIRE":
-                    if (int.TryParse(parts[2], out var sec))
-                        Expire(parts[1], sec, persist: false);
-                    break;
+                // ──────────────────────────────────────────────
+                // Critical change: read EXACTLY len characters
+                // (assuming UTF-8 stream, Read(len) gives correct chars)
+                char[] buffer = new char[len];
+                int readChars = reader.Read(buffer, 0, len);
+
+                if (readChars != len)
+                {
+                    Debug.WriteLine($"[AOF] Short read for bulk string: expected {len} chars, got {readChars}");
+                    valid = false;
+                    continue;
+                }
+
+                string value = new string(buffer);
+
+                // Consume the trailing \r\n after the bulk string
+                string? terminator = reader.ReadLine();
+                if (terminator == null || !string.IsNullOrEmpty(terminator.Trim()))
+                {
+                    // In strict RESP, should be empty line or just \r\n
+                    // But many implementations are lenient
+                    Debug.WriteLine($"[AOF] Unexpected terminator after bulk: '{terminator}'");
+                    // You can choose to proceed or fail
+                    // For now, proceed leniently
+                }
+
+                commandArgs.Add(value);
             }
+
+            if (!valid || commandArgs.Count != argCount) continue;
+
+            string cmd = commandArgs[0].ToUpperInvariant();
+
+            try
+            {
+                switch (cmd)
+                {
+                    case "SET" when commandArgs.Count == 3:
+                        Set(commandArgs[1], commandArgs[2], persist: false);
+                        loaded++;
+                        break;
+
+                    case "DEL" when commandArgs.Count == 2:
+                        Del(commandArgs[1]!, persist: false);
+                        loaded++;
+                        break;
+
+                    case "EXPIRE" when commandArgs.Count == 3:
+                        if (int.TryParse(commandArgs[2], out int sec))
+                        {
+                            Expire(commandArgs[1]!, sec, persist: false);
+                            loaded++;
+                        }
+                        break;
+
+                    case "FLUSHDB":
+                        _data.Clear();
+                        loaded++;
+                        break;
+                }
+            }
+            catch { }
         }
-        catch { /* ignore corrupted lines */ }
+
+        Debug.WriteLine($"[AOF] Loaded {loaded} commands → {_data.Count} keys in memory");
     }
 
-    private void AppendToAof(string command)
+    //private void LoadAof()
+    //{
+    //    if (!File.Exists(_aofPath))
+    //    {
+    //        Debug.WriteLine("[AOF] No file");
+    //        return;
+    //    }
+
+    //    Debug.WriteLine("[AOF] Loading RESP format...");
+
+    //    using var fs = new FileStream(_aofPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+    //    using var reader = new StreamReader(fs, Encoding.UTF8);
+
+    //    int loaded = 0;
+
+    //    while (!reader.EndOfStream)
+    //    {
+    //        string? line = reader.ReadLine();
+    //        if (line == null) break;
+
+    //        line = line.Trim();
+    //        if (string.IsNullOrEmpty(line) || line.StartsWith("#")) continue;
+
+    //        if (!line.StartsWith("*")) continue;  // skip invalid
+
+    //        if (!int.TryParse(line.Substring(1), out int argCount) || argCount < 1) continue;
+
+    //        var commandArgs = new List<string?>(argCount);
+
+    //        bool valid = true;
+
+    //        for (int i = 0; i < argCount; i++)
+    //        {
+    //            string? lenLine = reader.ReadLine();
+    //            if (lenLine == null || !lenLine.StartsWith("$"))
+    //            {
+    //                valid = false;
+    //                break;
+    //            }
+
+    //            if (!int.TryParse(lenLine.Substring(1), out int len))
+    //            {
+    //                valid = false;
+    //                break;
+    //            }
+
+    //            string? value = reader.ReadLine();
+    //            if (value == null || Encoding.UTF8.GetByteCount(value) != len)
+    //            {
+    //                valid = false;
+    //                break;
+    //            }
+
+    //            commandArgs.Add(value);
+    //        }
+
+    //        if (!valid || commandArgs.Count != argCount) continue;
+
+    //        // Now replay
+    //        string cmd = commandArgs[0]!.ToUpperInvariant();
+
+    //        try
+    //        {
+    //            switch (cmd)
+    //            {
+    //                case "SET" when commandArgs.Count == 3:
+    //                    Set(commandArgs[1]!, commandArgs[2]!, persist: false);
+    //                    loaded++;
+    //                    break;
+
+    //                case "DEL" when commandArgs.Count == 2:
+    //                    Del(commandArgs[1]!, persist: false);
+    //                    loaded++;
+    //                    break;
+
+    //                case "EXPIRE" when commandArgs.Count == 3:
+    //                    if (int.TryParse(commandArgs[2], out int sec))
+    //                    {
+    //                        Expire(commandArgs[1]!, sec, persist: false);
+    //                        loaded++;
+    //                    }
+    //                    break;
+
+    //                case "FLUSHDB":
+    //                    _data.Clear();
+    //                    loaded++;
+    //                    break;
+    //            }
+    //        }
+    //        catch { /* skip bad command */ }
+    //    }
+
+    //    Debug.WriteLine($"[AOF] Loaded {loaded} commands");
+    //}
+    private void AppendRespCommand(string cmdName, params string[] args)
     {
         lock (_aofLock)
         {
-            _aofWriter?.WriteLine(command);
+            if (_aofWriter == null) return;
+
+            // Write array header
+            _aofWriter.WriteLine($"*{args.Length + 1}");  // +1 for command name
+
+            // Command name
+            WriteBulk(_aofWriter, cmdName);
+
+            foreach (var arg in args)
+                WriteBulk(_aofWriter, arg);
+
+            _aofWriter.Flush();
         }
+    }
+
+    private static void WriteBulk(StreamWriter writer, string s)
+    {
+        var bytes = System.Text.Encoding.UTF8.GetByteCount(s);
+        writer.WriteLine($"${bytes}");
+        writer.WriteLine(s);
     }
 
     // =======================
@@ -189,7 +354,7 @@ public sealed class InMemoryStore : IDisposable
         _data[key] = new ValueEntry { Value = value };
 
         if (persist)
-            AppendToAof($"SET {key} {value}");
+            AppendRespCommand("SET", key, value);
 
         return true;
     }
@@ -213,14 +378,36 @@ public sealed class InMemoryStore : IDisposable
         var removed = _data.TryRemove(key, out _);
 
         if (removed && persist)
-            AppendToAof($"DEL {key}");
+            AppendRespCommand("DEL", key);
 
         return removed;
     }
 
     public bool Exists(string key) => Get(key) != null;
 
-    public void FlushAll() => _data.Clear();
+    public void FlushAll()
+    {
+        _data.Clear();
+
+        // Make it survive restart
+        lock (_aofLock)
+        {
+            if (_aofWriter != null)
+            {
+                _aofWriter.Dispose();
+                _aofWriter = null;
+            }
+
+            // Truncate + write new header
+            using (var fs = new FileStream(_aofPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite))
+            using (var writer = new StreamWriter(fs, Encoding.UTF8))
+            {
+                writer.WriteLine($"# DevCache AOF flushed & restarted {DateTime.UtcNow:o}");
+            }
+
+            OpenAofWriter();  // reopen for future writes
+        }
+    }
 
     public bool Expire(string key, int seconds, bool persist = true)
     {
@@ -230,7 +417,7 @@ public sealed class InMemoryStore : IDisposable
         entry.ExpiryUtc = DateTime.UtcNow.AddSeconds(seconds);
 
         if (persist)
-            AppendToAof($"EXPIRE {key} {seconds}");
+            AppendRespCommand("EXPIRE", key, seconds.ToString());
 
         return true;
     }
