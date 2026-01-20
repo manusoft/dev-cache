@@ -6,7 +6,15 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
 	<AssemblyName>devcache-cli</AssemblyName>
+	<ApplicationIcon>appicon.ico</ApplicationIcon>
+	<Copyright>Manuhub © 2026</Copyright>
+	<Description>DeveCache Command line app.</Description>
+	<PackageIcon></PackageIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="appicon.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="ReadLine" Version="2.0.1" />
@@ -15,6 +23,13 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DevCache.Shared\DevCache.Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="appicon.ico">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
   </ItemGroup>
 
 </Project>

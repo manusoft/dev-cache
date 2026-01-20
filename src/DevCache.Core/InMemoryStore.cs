@@ -92,16 +92,67 @@ public sealed class InMemoryStore : IDisposable
             return;
         }
 
-        Debug.WriteLine("[AOF] Loading RESP format...");
+        Debug.WriteLine("[AOF] Loading RESP AOF (byte-oriented)...");
 
         int loaded = 0;
 
         using var fs = new FileStream(_aofPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        using var reader = new StreamReader(fs, Encoding.UTF8);
 
-        while (!reader.EndOfStream)
+        byte[] buffer = new byte[4096]; // small working buffer
+        int pos = 0;                    // current position in buffer
+        int bytesInBuffer = 0;
+
+        // Helper to read next line (\r\n terminated) from stream
+        string? ReadNextLine()
         {
-            string? line = reader.ReadLine();
+            var lineBytes = new List<byte>();
+            while (true)
+            {
+                if (pos >= bytesInBuffer)
+                {
+                    bytesInBuffer = fs.Read(buffer, 0, buffer.Length);
+                    if (bytesInBuffer == 0) return null;
+                    pos = 0;
+                }
+
+                byte b = buffer[pos++];
+                lineBytes.Add(b);
+
+                if (b == '\n' && lineBytes.Count >= 2 && lineBytes[^2] == '\r')
+                {
+                    lineBytes.RemoveAt(lineBytes.Count - 1); // remove \n
+                    lineBytes.RemoveAt(lineBytes.Count - 1); // remove \r
+                    return Encoding.UTF8.GetString(lineBytes.ToArray());
+                }
+            }
+        }
+
+        // Helper to read exactly n bytes
+        byte[]? ReadExactBytes(int count)
+        {
+            var result = new byte[count];
+            int readTotal = 0;
+
+            while (readTotal < count)
+            {
+                if (pos >= bytesInBuffer)
+                {
+                    bytesInBuffer = fs.Read(buffer, 0, buffer.Length);
+                    if (bytesInBuffer == 0) return null;
+                    pos = 0;
+                }
+
+                int toCopy = Math.Min(count - readTotal, bytesInBuffer - pos);
+                Array.Copy(buffer, pos, result, readTotal, toCopy);
+                pos += toCopy;
+                readTotal += toCopy;
+            }
+            return result;
+        }
+
+        while (true)
+        {
+            string? line = ReadNextLine();
             if (line == null) break;
 
             line = line.Trim();
@@ -116,46 +167,37 @@ public sealed class InMemoryStore : IDisposable
 
             for (int i = 0; i < argCount && valid; i++)
             {
-                string? lenLine = reader.ReadLine();
+                string? lenLine = ReadNextLine();
                 if (lenLine == null || !lenLine.StartsWith("$"))
                 {
                     valid = false;
                     continue;
                 }
 
-                if (!int.TryParse(lenLine.Substring(1), out int len))
+                if (!int.TryParse(lenLine.Substring(1), out int byteLen) || byteLen < 0)
                 {
                     valid = false;
                     continue;
                 }
 
-                // ──────────────────────────────────────────────
-                // Critical change: read EXACTLY len characters
-                // (assuming UTF-8 stream, Read(len) gives correct chars)
-                char[] buffer = new char[len];
-                int readChars = reader.Read(buffer, 0, len);
-
-                if (readChars != len)
+                byte[]? valueBytes = ReadExactBytes(byteLen);
+                if (valueBytes == null || valueBytes.Length != byteLen)
                 {
-                    Debug.WriteLine($"[AOF] Short read for bulk string: expected {len} chars, got {readChars}");
+                    Debug.WriteLine($"[AOF] Short read for bulk: expected {byteLen} bytes");
                     valid = false;
                     continue;
                 }
 
-                string value = new string(buffer);
-
-                // Consume the trailing \r\n after the bulk string
-                string? terminator = reader.ReadLine();
-                if (terminator == null || !string.IsNullOrEmpty(terminator.Trim()))
-                {
-                    // In strict RESP, should be empty line or just \r\n
-                    // But many implementations are lenient
-                    Debug.WriteLine($"[AOF] Unexpected terminator after bulk: '{terminator}'");
-                    // You can choose to proceed or fail
-                    // For now, proceed leniently
-                }
-
+                string value = Encoding.UTF8.GetString(valueBytes);
                 commandArgs.Add(value);
+
+                // Consume the \r\n after bulk string
+                byte[]? crlf = ReadExactBytes(2);
+                if (crlf == null || crlf.Length != 2 || crlf[0] != '\r' || crlf[1] != '\n')
+                {
+                    Debug.WriteLine($"[AOF] Invalid or missing CRLF after bulk (read {crlf?.Length ?? 0} bytes)");
+                    // Lenient: continue anyway for dev
+                }
             }
 
             if (!valid || commandArgs.Count != argCount) continue;
@@ -172,14 +214,14 @@ public sealed class InMemoryStore : IDisposable
                         break;
 
                     case "DEL" when commandArgs.Count == 2:
-                        Del(commandArgs[1]!, persist: false);
+                        Del(commandArgs[1], persist: false);
                         loaded++;
                         break;
 
                     case "EXPIRE" when commandArgs.Count == 3:
-                        if (int.TryParse(commandArgs[2], out int sec))
+                        if (int.TryParse(commandArgs[2], out int sec) && sec >= 0)
                         {
-                            Expire(commandArgs[1]!, sec, persist: false);
+                            Expire(commandArgs[1], sec, persist: false);
                             loaded++;
                         }
                         break;
@@ -190,10 +232,13 @@ public sealed class InMemoryStore : IDisposable
                         break;
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[AOF] Failed replaying {cmd}: {ex.Message}");
+            }
         }
 
-        Debug.WriteLine($"[AOF] Loaded {loaded} commands → {_data.Count} keys in memory");
+        Debug.WriteLine($"[AOF] Loaded {loaded} commands → {_data.Count} keys, AOF file size: {new FileInfo(_aofPath).Length} bytes");
     }
 
     private void AppendRespCommand(string cmdName, params string[] args)
@@ -254,25 +299,59 @@ public sealed class InMemoryStore : IDisposable
         {
             try
             {
-                await Task.Delay(10000, _cts.Token); // check every 10 seconds
+                await Task.Delay(15000, _cts.Token); // ← increase to 15 seconds to give OS more time
 
                 if (!File.Exists(_aofPath)) continue;
 
-                var fileInfo = new FileInfo(_aofPath);
-                long currentSize = fileInfo.Length;
+                long currentSize = 0;
+                bool exists = false;
 
-                // Skip if file is still small
-                if (currentSize < AUTO_REWRITE_MIN_SIZE_BYTES) continue;
+                try
+                {
+                    using var fs = new FileStream(_aofPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                    currentSize = fs.Length;
+                    exists = true;
+                }
+                catch (IOException ex)
+                {
+                    Debug.WriteLine($"[MONITOR] File access issue: {ex.Message} – retrying next cycle");
+                    continue;
+                }
 
-                // Trigger if file grew by X% since last rewrite
+                Debug.WriteLine($"[MONITOR] Raw check – exists: {exists}, size: {currentSize} bytes ({currentSize / 1024.0:F2} KB), min threshold: {AUTO_REWRITE_MIN_SIZE_BYTES} bytes");
+
+                if (currentSize < AUTO_REWRITE_MIN_SIZE_BYTES)
+                {
+                    Debug.WriteLine("[MONITOR] Skipped – file too small");
+                    continue;
+                }
+
+                if (currentSize <= _lastRewriteSize)
+                {
+                    Debug.WriteLine("[MONITOR] Size did not grow or shrank – skipping");
+                    continue;
+                }
+
                 bool shouldRewrite =
                     _lastRewriteSize == 0 ||
                     currentSize >= _lastRewriteSize * (1 + AUTO_REWRITE_GROWTH_PERCENT / 100.0);
 
+                // Optional safety (recommended):
+                if (shouldRewrite && currentSize < _lastRewriteSize + 4096)
+                {
+                    Debug.WriteLine("[AOF] Skipping rewrite – size change too small");
+                    continue;
+                }
+
                 if (shouldRewrite)
                 {
-                    Debug.WriteLine($"[AOF] Rewrite triggered – current size: {currentSize / 1024} KB, last rewrite: {_lastRewriteSize / 1024} KB");
+                    double growth = ((double)currentSize / Math.Max(1, _lastRewriteSize) - 1) * 100;
+                    Debug.WriteLine($"[AOF] Rewrite triggered – current: {currentSize / 1024.0:F2} KB, last: {_lastRewriteSize / 1024.0:F2} KB, growth: {growth:F1}%");
                     await RewriteAofAsync();
+                }
+                else
+                {
+                    Debug.WriteLine($"[MONITOR] No rewrite needed – current: {currentSize / 1024.0:F2} KB");
                 }
             }
             catch (Exception ex)
@@ -284,83 +363,147 @@ public sealed class InMemoryStore : IDisposable
 
     private async Task RewriteAofAsync()
     {
+        string tempPath = _aofPath + ".rewrite.tmp";
+        string backupPath = _aofPath + ".backup"; // optional extra safety
+
+        StreamWriter? oldWriter = null;
+
         lock (_aofLock)
         {
-            if (_aofWriter != null)
-            {
-                _aofWriter.Flush();
-                _aofWriter.Dispose();
-                _aofWriter = null;
-            }
+            oldWriter = _aofWriter;
+            _aofWriter = null; // prevent writes during rewrite
         }
 
-        string tempPath = _aofPath + ".rewrite.tmp";
+        if (oldWriter != null)
+        {
+            try
+            {
+                await oldWriter.FlushAsync();
+                oldWriter.Dispose();
+            }
+            catch { /* best effort */ }
+        }
+
 
         try
         {
-            // 1. Get current snapshot (safely)
-            var currentData = _data.ToArray(); // snapshot
+            // Optional: backup current AOF (good for paranoia)
+            if (File.Exists(_aofPath)) File.Copy(_aofPath, backupPath, true);
 
-            // 2. Write new compact AOF
+            // 1. Write new compact AOF to temp            
             using (var tempFs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
             using (var tempWriter = new StreamWriter(tempFs, Encoding.UTF8))
             {
                 tempWriter.WriteLine($"# DevCache AOF rewritten {DateTime.UtcNow:o}");
+                tempWriter.WriteLine(); // empty line for readability
+
+                var currentData = _data.ToArray();
+
+                Debug.WriteLine($"[REWRITE] Rewriting {currentData.Length} non-expired entries");
+
+                int writtenCount = 0;
 
                 foreach (var kvp in currentData)
                 {
                     var entry = kvp.Value;
 
-                    // Skip expired entries
+                    // Skip expired
                     if (entry.ExpiryUtc.HasValue && entry.ExpiryUtc <= DateTime.UtcNow)
                         continue;
 
-                    // Write SET command in RESP format
-                    var args = new[] { "SET", kvp.Key, entry.Value };
-                    tempWriter.WriteLine($"*{args.Length}");
-                    foreach (var arg in args)
-                    {
-                        int byteLen = Encoding.UTF8.GetByteCount(arg);
-                        tempWriter.WriteLine($"${byteLen}");
-                        tempWriter.WriteLine(arg);
-                    }
+                    // Write SET
+                    await WriteRespArrayAsync(tempWriter,
+                        "SET",
+                        kvp.Key,
+                        entry.Value
+                    );
 
-                    // Optional: write EXPIRE if it has TTL
+                    writtenCount++;
+
+                    // Write EXPIRE if still valid TTL
                     if (entry.ExpiryUtc.HasValue)
                     {
                         long ttlSec = (long)(entry.ExpiryUtc.Value - DateTime.UtcNow).TotalSeconds;
                         if (ttlSec > 0)
                         {
-                            var expireArgs = new[] { "EXPIRE", kvp.Key, ttlSec.ToString() };
-                            tempWriter.WriteLine($"*{expireArgs.Length}");
-                            foreach (var arg in expireArgs)
-                            {
-                                int byteLen = Encoding.UTF8.GetByteCount(arg);
-                                tempWriter.WriteLine($"${byteLen}");
-                                tempWriter.WriteLine(arg);
-                            }
+                            await WriteRespArrayAsync(tempWriter,
+                                "EXPIRE",
+                                kvp.Key,
+                                ttlSec.ToString()
+                            );
+                            writtenCount++;
                         }
-                    }
+
+                        Debug.WriteLine($"[REWRITE] Wrote key: {kvp.Key} (TTL: {ttlSec})");
+                    }                    
                 }
 
                 await tempWriter.FlushAsync();
+                Debug.WriteLine($"[REWRITE] Finished writing {writtenCount} commands");
             }
 
-            // 3. Atomic replace
+
             lock (_aofLock)
             {
-                File.Move(tempPath, _aofPath, overwrite: true);
-                _lastRewriteSize = new FileInfo(_aofPath).Length;
-                OpenAofWriter(); // reopen writer
-            }
+                // Backup old file (optional but helpful)
+                if (File.Exists(_aofPath))
+                {
+                    string backup = _aofPath + ".old";
+                    if (File.Exists(backup)) File.Delete(backup);
+                    File.Move(_aofPath, backup, overwrite: true);
+                }
 
-            Debug.WriteLine($"[AOF] Rewrite completed – new size: {_lastRewriteSize / 1024} KB");
+                // Perform the move / copy
+                File.Move(tempPath, _aofPath, overwrite: true);   // or use File.Copy + Delete(tempPath) if Move still causes issues
+
+                // Flush file system cache by reopening and closing
+                using (var fs = new FileStream(_aofPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                {
+                    // just open/close to force refresh
+                }
+
+                // Get fresh FileInfo – do NOT reuse old instance
+                var freshInfo = new FileInfo(_aofPath);
+
+                if (!freshInfo.Exists)
+                {
+                    Debug.WriteLine("[AOF] CRITICAL: File disappeared after move!");
+                    // Fallback: restore from .old if possible
+                    if (File.Exists(_aofPath + ".old"))
+                    {
+                        File.Move(_aofPath + ".old", _aofPath, overwrite: true);
+                        freshInfo = new FileInfo(_aofPath);
+                    }
+                }
+
+                long newSize = freshInfo.Length;
+
+                _lastRewriteSize = newSize;
+
+                // Log EVERYTHING
+                Debug.WriteLine($"[AOF] After move/copy:");
+                Debug.WriteLine($"    Path: {freshInfo.FullName}");
+                Debug.WriteLine($"    Exists: {freshInfo.Exists}");
+                Debug.WriteLine($"    Size on disk: {newSize} bytes ({newSize / 1024.0:F2} KB)");
+                Debug.WriteLine($"    _lastRewriteSize now set to: {_lastRewriteSize} bytes");
+
+                OpenAofWriter(); // reopen for appends
+
+                // Final confirmation log
+                Debug.WriteLine($"[AOF] Rewrite completed – new size: {_lastRewriteSize / 1024.0:F2} KB");
+            }
         }
         catch (Exception ex)
         {
             Debug.WriteLine($"[AOF Rewrite] Failed: {ex.Message}");
             if (File.Exists(tempPath)) File.Delete(tempPath);
-            OpenAofWriter(); // recover writer
+
+            // Critical: always recover writer
+            lock (_aofLock)
+            {
+                if (_aofWriter == null)
+                    OpenAofWriter();
+            }
         }
     }
 
@@ -510,6 +653,22 @@ public sealed class InMemoryStore : IDisposable
         }
     }
 
+    // Helper method (add this)
+    private static async Task WriteRespArrayAsync(StreamWriter w, params string[] parts)
+    {
+        // parts = e.g. ["SET", "key", "value"] or ["EXPIRE", "key", "60"]
+        await w.WriteLineAsync($"*{parts.Length}");
+
+        foreach (var part in parts)
+        {
+            byte[] bytes = Encoding.UTF8.GetBytes(part);
+            await w.WriteLineAsync($"${bytes.Length}");
+            await w.WriteAsync(part);           // write string directly
+            await w.WriteLineAsync();           // \r\n after value
+        }
+
+        await w.FlushAsync();  // ensure data is written
+    }
 }
 
 public record CacheItem

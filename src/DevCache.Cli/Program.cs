@@ -8,6 +8,10 @@ internal class Program
 {
     private static async Task<int> Main(string[] args)
     {
+        Console.Title = "DevCache v1.0.0";
+        Console.InputEncoding = Encoding.UTF8;
+        Console.OutputEncoding = Encoding.UTF8;         
+
         Option<string> hostOption = new("--host", "-h")
         {
             Description = "Server hostname or IP",
@@ -106,8 +110,8 @@ internal class Program
     private static async Task RunInteractiveRepl(string host, int port, CancellationToken ct)
     {
         Console.ForegroundColor = ConsoleColor.DarkYellow;
-        Console.WriteLine($"DevCache CLI v1.0.0 – connected to {host}:{port}");
-        Console.WriteLine("Copyright (C) Manuhub. All rights reserved.");
+        Console.WriteLine($"DevCache CLI v1.0.0"); // "DevCache CLI v1.0.0 – connected to {host}:{port}"
+        Console.WriteLine("Copyright © Manuhub. All rights reserved.");
         Console.WriteLine();
         Console.ResetColor();
 
