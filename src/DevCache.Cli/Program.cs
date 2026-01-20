@@ -122,9 +122,9 @@ internal class Program
         while (!ct.IsCancellationRequested)
         {
             Console.ForegroundColor = ConsoleColor.DarkCyan;
-            Console.Write($"{host}:{port}> ");
-            Console.ResetColor();
             var line = ReadLine.Read($"{host}:{port}> ").Trim();
+            Console.ResetColor();
+            
             if (string.IsNullOrWhiteSpace(line)) continue;
 
             if (line is "exit" or "quit")
