@@ -29,6 +29,8 @@ public static class CommandRegistry
             // TTL
             ["EXPIRE"] = ExpireAsync,
             ["TTL"] = TtlAsync,
+            ["PEXPIRE"] = PExpireAsync,
+            ["PTTL"] = PTtlAsync,
 
             // DB
             ["FLUSHDB"] = FlushDbAsync,
@@ -74,18 +76,81 @@ public static class CommandRegistry
     // ---------------- KV ----------------
     private static async Task SetAsync(CommandContext ctx, IReadOnlyList<string> args)
     {
-        if (args.Count != 2)
+        if (args.Count < 2)
         {
-            await ctx.Writer.WriteAsync(ctx.Stream,
-                RespValue.Error("ERR wrong number of arguments for 'set' command"));
+            await Error(ctx, "ERR wrong number of arguments for 'set' command");
             return;
         }
 
         string key = args[0];
         string value = args[1];
 
-        // This line ensures previous expiry is cleared — critical for Redis compatibility
-        Store.Set(key, value);
+        bool? nx = null;
+
+        long? expireMs = null;
+
+        for (int i = 2; i < args.Count; i++)
+        {
+            string opt = args[i].ToUpperInvariant();
+
+            switch (opt)
+            {
+                case "EX":
+                    if (i + 1 >= args.Count || !int.TryParse(args[i + 1], out int sec) || sec <= 0)
+                    {
+                        await Error(ctx, "ERR value is not an integer or out of range");
+                        return;
+                    }
+                    expireMs = sec * 1000L;
+                    i++;
+                    break;
+
+                case "PX":
+                    if (i + 1 >= args.Count || !long.TryParse(args[i + 1], out long ms) || ms <= 0)
+                    {
+                        await Error(ctx, "ERR value is not an integer or out of range");
+                        return;
+                    }
+                    expireMs = ms;
+                    i++;
+                    break;
+
+                case "NX":
+                    nx = true;
+                    break;
+
+                case "XX":
+                    nx = false;
+                    break;
+
+                default:
+                    await Error(ctx, $"ERR syntax error near '{opt}'");
+                    return;
+            }
+        }
+
+        bool keyExists = Store.Exists(key);
+
+        if (nx == true && keyExists)
+        {
+            await ctx.Writer.WriteAsync(ctx.Stream, RespValue.Null());
+            return;
+        }
+
+        if (nx == false && !keyExists)
+        {
+            await ctx.Writer.WriteAsync(ctx.Stream, RespValue.Null());
+            return;
+        }
+
+        // Set the value FIRST
+        Store.Set(key, value, persist: true);
+
+        // Apply expiry AFTER set (so key exists)
+        if (expireMs.HasValue)
+        {
+            Store.Expire(key, expireMs.Value, persist: true);
+        }
 
         await ctx.Writer.WriteAsync(ctx.Stream, RespValue.Simple("OK"));
     }
@@ -161,7 +226,35 @@ public static class CommandRegistry
 
         await ctx.Writer.WriteAsync(
             ctx.Stream,
-            RespValue.Integer(Store.TTL(args[0])));
+            RespValue.Integer(Store.GetTtls(args[0])));
+    }
+
+    private static async Task PExpireAsync(CommandContext ctx, IReadOnlyList<string> args)
+    {
+        if (args.Count != 2)
+        {
+            await Error(ctx, "ERR wrong number of arguments for 'pexpire' command");
+            return;
+        }
+
+        if (!long.TryParse(args[1], out long ms) || ms < 0)
+        {
+            await Error(ctx, "ERR value is not an integer or out of range");
+            return;
+        }
+
+        await ctx.Writer.WriteAsync(ctx.Stream, RespValue.Integer(Store.Expire(args[0], ms, persist: true) ? 1 : 0));
+    }
+
+    private static async Task PTtlAsync(CommandContext ctx, IReadOnlyList<string> args)
+    {
+        if (args.Count != 1)
+        {
+            await Error(ctx, "ERR wrong number of arguments for 'pttl' command");
+            return;
+        }
+
+        await ctx.Writer.WriteAsync(ctx.Stream, RespValue.Integer(Store.GetTtlMs(args[0])));
     }
 
     // ---------------- DB ----------------  

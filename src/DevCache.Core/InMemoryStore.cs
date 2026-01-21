@@ -19,23 +19,30 @@ public sealed class InMemoryStore : IDisposable
     private sealed class ValueEntry
     {
         public string Value = default!;
-        public DateTime? ExpiryUtc;
+        public DateTimeOffset? ExpiryUtc; // ← use DateTimeOffset for ms precision
 
         public string Type => "string";
-        public int Size => Value.Length; // Value?.Length ?? 0;
+        public int Size => Value.Length;
 
         public long GetTtlSeconds()
         {
             if (!ExpiryUtc.HasValue) return -1;
-            var ttl = (long)(ExpiryUtc.Value - DateTime.UtcNow).TotalSeconds;
-            return ttl > 0 ? ttl : -2;
+            var remaining = ExpiryUtc.Value - DateTimeOffset.UtcNow;
+            return remaining.TotalSeconds > 0 ? (long)remaining.TotalSeconds : -2;
+        }
+
+        public long GetTtlMilliseconds()
+        {
+            if (!ExpiryUtc.HasValue) return -1;
+            var remaining = ExpiryUtc.Value - DateTimeOffset.UtcNow;
+            return remaining.TotalMilliseconds > 0 ? (long)remaining.TotalMilliseconds : -2;
         }
     }
 
     private readonly string _aofPath;
     private StreamWriter? _aofWriter;
     private readonly object _aofLock = new();
-    
+
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _expiryTask;
     private Task? _rewriteTask;
@@ -221,7 +228,15 @@ public sealed class InMemoryStore : IDisposable
                     case "EXPIRE" when commandArgs.Count == 3:
                         if (int.TryParse(commandArgs[2], out int sec) && sec >= 0)
                         {
-                            Expire(commandArgs[1], sec, persist: false);
+                            Expire(commandArgs[1], sec, persist: false);  // seconds overload
+                            loaded++;
+                        }
+                        break;
+
+                    case "PEXPIRE" when commandArgs.Count == 3:
+                        if (long.TryParse(commandArgs[2], out long ms) && ms >= 0)
+                        {
+                            Expire(commandArgs[1], ms, persist: false);   // ms overload
                             loaded++;
                         }
                         break;
@@ -289,7 +304,9 @@ public sealed class InMemoryStore : IDisposable
                 Debug.WriteLine($"[EXPIRY] {ex.Message}");
             }
 
-            await Task.Delay(1000, _cts.Token);
+            //await Task.Delay(1000, _cts.Token); //TODO: Revert to 1000 ms in production
+            // Faster check for testing (adjust as needed)
+            await Task.Delay(200, _cts.Token);  // ← 200 ms instead of 1000 ms
         }
     }
 
@@ -435,7 +452,7 @@ public sealed class InMemoryStore : IDisposable
                         }
 
                         Debug.WriteLine($"[REWRITE] Wrote key: {kvp.Key} (TTL: {ttlSec})");
-                    }                    
+                    }
                 }
 
                 await tempWriter.FlushAsync();
@@ -570,23 +587,42 @@ public sealed class InMemoryStore : IDisposable
         }
     }
 
+    // Overload for seconds (used by EX)
     public bool Expire(string key, int seconds, bool persist = true)
     {
-        if (!_data.TryGetValue(key, out var entry))
-            return false;
+        return Expire(key, (long)seconds * 1000, persist);
+    }
 
-        entry.ExpiryUtc = DateTime.UtcNow.AddSeconds(seconds);
+    // Overload for milliseconds (used by PX and PEXPIRE)
+    public bool Expire(string key, long milliseconds, bool persist = true)
+    {
+        if (!_data.TryGetValue(key, out var entry))
+        {
+            Debug.WriteLine($"[EXPIRE] Key not found: {key}");
+            return false;
+        }
+
+        var newExpiry = DateTimeOffset.UtcNow.AddMilliseconds(milliseconds);
+        entry.ExpiryUtc = newExpiry;
+
+        Debug.WriteLine($"[EXPIRE] Set expiry for {key} to {newExpiry:o} (in {milliseconds} ms)");
 
         if (persist)
-            AppendRespCommand("EXPIRE", key, seconds.ToString());
+            AppendRespCommand("PEXPIRE", key, milliseconds.ToString()); 
 
         return true;
     }
 
-    public long TTL(string key)
+    public long GetTtls(string key)
     {
         if (!_data.TryGetValue(key, out var entry)) return -2;
         return entry.GetTtlSeconds();
+    }
+
+    public long GetTtlMs(string key)
+    {
+        if (!_data.TryGetValue(key, out var entry)) return -2;
+        return entry.GetTtlMilliseconds();
     }
 
     // ---------------- UI / DataGrid Support ----------------
