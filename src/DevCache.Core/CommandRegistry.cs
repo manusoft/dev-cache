@@ -1,4 +1,5 @@
 ﻿using DevCache.Common;
+using DevCache.Core.Helpers;
 
 namespace DevCache.Core;
 
@@ -6,6 +7,7 @@ public static class CommandRegistry
 {
     private static readonly Dictionary<string, RedisCommand> _commands;
     private static InMemoryStore? _store;
+
     public static InMemoryStore Store => _store
         ?? throw new InvalidOperationException("Store not initialized");
 
@@ -273,11 +275,11 @@ public static class CommandRegistry
     // ---------------- UI / Introspection ----------------
     private static async Task KeysAsync(CommandContext ctx, IReadOnlyList<string> args)
     {
-        string pattern;
+        string pattern = "*"; // default
 
         if (args.Count == 0)
         {
-            pattern = "*";           // redis-cli default behavior: KEYS without arg = KEYS *
+            pattern = "*";
         }
         else if (args.Count == 1)
         {
@@ -290,19 +292,14 @@ public static class CommandRegistry
             return;
         }
 
-        if (pattern != "*")
-        {
-            await ctx.Writer.WriteAsync(ctx.Stream,
-                RespValue.Error($"ERR pattern '{pattern}' not supported (only '*' allowed in this version)"));
-            return;
-        }
-
-        var keyList = Store.Keys
+        // Get all non-expired keys
+        var matchingKeys = Store.Keys
+            .Where(k => CommonHelper.MatchesPattern(k, pattern))
             .Select(k => RespValue.Bulk(k))
             .ToList()
             .AsReadOnly();
 
-        await ctx.Writer.WriteAsync(ctx.Stream, RespValue.Array(keyList));
+        await ctx.Writer.WriteAsync(ctx.Stream, RespValue.Array(matchingKeys));
     }
 
     private static async Task GetMetaAsync(CommandContext ctx, IReadOnlyList<string> args)

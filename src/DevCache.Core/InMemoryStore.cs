@@ -1,4 +1,5 @@
-﻿using System.Collections.Concurrent;
+﻿using DevCache.Core.Models;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
 
@@ -81,12 +82,12 @@ public sealed class InMemoryStore : IDisposable
                 _aofPath,
                 FileMode.Append,
                 FileAccess.Write,
-                FileShare.ReadWrite   // ✅ FIX: allow reading while writing
+                FileShare.ReadWrite   // allow reading while writing
             ),
             Encoding.UTF8
         )
         {
-            AutoFlush = false   // ← important: let background handle it
+            AutoFlush = false   // let background handle it
         };
 
         _aofWriter.WriteLine($"# DevCache AOF started {DateTime.UtcNow:o}");
@@ -268,16 +269,13 @@ public sealed class InMemoryStore : IDisposable
         {
             if (_aofWriter == null) return;
 
-            // Write array header
-            _aofWriter.WriteLine($"*{args.Length + 1}");  // +1 for command name
+            _aofWriter.WriteLine($"*{args.Length + 1}");  
 
-            // Command name
             WriteBulk(_aofWriter, cmdName);
 
             foreach (var arg in args)
                 WriteBulk(_aofWriter, arg);
 
-            // Do NOT flush here anymore
             _needsFlush = true;  // flag for background flusher
         }
     }
@@ -552,7 +550,7 @@ public sealed class InMemoryStore : IDisposable
 
                 if (shouldFlush && _aofWriter != null)
                 {
-                    // Flush outside the lock — safe because _aofWriter is only disposed under lock
+                    // Flush outside lock – safe because writer is only closed under lock
                     await _aofWriter.FlushAsync();
                     Debug.WriteLine("[AOF] Background flush completed");
                 }
@@ -608,23 +606,23 @@ public sealed class InMemoryStore : IDisposable
     {
         _data.Clear();
 
-        // Make it survive restart
         lock (_aofLock)
         {
             if (_aofWriter != null)
             {
+                _aofWriter.Flush();
                 _aofWriter.Dispose();
                 _aofWriter = null;
             }
 
-            // Truncate + write new header
             using (var fs = new FileStream(_aofPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite))
             using (var writer = new StreamWriter(fs, Encoding.UTF8))
             {
                 writer.WriteLine($"# DevCache AOF flushed & restarted {DateTime.UtcNow:o}");
             }
 
-            OpenAofWriter();  // reopen for future writes
+            OpenAofWriter();
+            _needsFlush = false;
         }
     }
 
@@ -729,8 +727,12 @@ public sealed class InMemoryStore : IDisposable
         {
             if (_aofWriter != null)
             {
-                _aofWriter.Flush();
-                _aofWriter.Dispose();
+                try
+                {
+                    _aofWriter.Flush();  // final synchronous flush
+                    _aofWriter.Dispose();
+                }
+                catch { }
                 _aofWriter = null;
             }
         }
@@ -752,13 +754,4 @@ public sealed class InMemoryStore : IDisposable
 
         await w.FlushAsync();  // ensure data is written
     }
-}
-
-public record CacheItem
-{
-    public string Key { get; init; } = "";
-    public string Value { get; init; } = "";
-    public string Type { get; init; } = "string";
-    public int TtlSeconds { get; init; }
-    public int SizeBytes { get; init; }
 }
