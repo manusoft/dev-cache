@@ -2,86 +2,107 @@
 
 namespace DevCache.Common;
 
+/// <summary>
+/// Reads RESP2 protocol from a stream (TCP client → server direction)
+/// </summary>
 public sealed class RespReader
 {
     private readonly Stream _stream;
-    private readonly byte[] _buffer = new byte[1];
+    private readonly byte[] _singleByteBuffer = new byte[1];
 
     public RespReader(Stream stream)
     {
-        _stream = stream;
+        _stream = stream ?? throw new ArgumentNullException(nameof(stream));
     }
 
     public async Task<RespValue?> ReadAsync(CancellationToken ct = default)
     {
-        int read = await _stream.ReadAsync(_buffer, ct);
-        if (read == 0)
-            return null; // client disconnected
+        // Read first byte (type indicator)
+        int read = await _stream.ReadAsync(_singleByteBuffer.AsMemory(0, 1), ct);
+        if (read == 0) return null; // EOF / disconnect
 
-        return _buffer[0] switch
+        return _singleByteBuffer[0] switch
         {
             (byte)'+' => await ReadSimpleStringAsync(ct),
             (byte)'-' => await ReadErrorAsync(ct),
             (byte)':' => await ReadIntegerAsync(ct),
             (byte)'$' => await ReadBulkStringAsync(ct),
             (byte)'*' => await ReadArrayAsync(ct),
-            _ => throw new InvalidOperationException("Unknown RESP prefix")
+            _ => throw new InvalidOperationException($"Unknown RESP prefix: {(char)_singleByteBuffer[0]}")
         };
     }
 
     private async Task<RespValue> ReadSimpleStringAsync(CancellationToken ct)
-        => RespValue.Simple(await ReadLineAsync(ct));
+         => RespValue.SimpleString(await ReadLineAsync(ct));
 
     private async Task<RespValue> ReadErrorAsync(CancellationToken ct)
         => RespValue.Error(await ReadLineAsync(ct));
 
     private async Task<RespValue> ReadIntegerAsync(CancellationToken ct)
-        => RespValue.Integer(long.Parse(await ReadLineAsync(ct)));
+    {
+        string line = await ReadLineAsync(ct);
+        if (!long.TryParse(line, out long val))
+            throw new InvalidOperationException($"Invalid integer format: {line}");
+        return RespValue.Integer(val);
+    }
 
     private async Task<RespValue> ReadBulkStringAsync(CancellationToken ct)
     {
-        int length = int.Parse(await ReadLineAsync(ct));
+        string lenLine = await ReadLineAsync(ct);
+        if (!int.TryParse(lenLine, out int length))
+            throw new InvalidOperationException($"Invalid bulk length: {lenLine}");
+
         if (length == -1)
-            return RespValue.Null();
+            return RespValue.NullBulk;
 
         byte[] data = new byte[length];
         await ReadExactAsync(data, ct);
-        await ReadCrLfAsync(ct);
+        await ReadCrLfAsync(ct); // consume trailing \r\n
 
-        return RespValue.Bulk(Encoding.UTF8.GetString(data));
+        string content = Encoding.UTF8.GetString(data);
+        return RespValue.BulkString(content);
     }
 
     private async Task<RespValue> ReadArrayAsync(CancellationToken ct)
     {
-        int count = int.Parse(await ReadLineAsync(ct));
+        string countLine = await ReadLineAsync(ct);
+        if (!int.TryParse(countLine, out int count))
+            throw new InvalidOperationException($"Invalid array count: {countLine}");
+
         if (count == -1)
-            return RespValue.Null();
+            return RespValue.NullArray;
 
         var items = new List<RespValue>(count);
+
         for (int i = 0; i < count; i++)
         {
-            var value = await ReadAsync(ct);
-            if (value == null)
-                throw new IOException("Unexpected end of stream");
-
-            items.Add(value);
+            var item = await ReadAsync(ct);
+            if (item is null)
+                throw new IOException("Unexpected end of stream while reading array element");
+            items.Add(item);
         }
 
-        // Just pass the list of items — no first/rest splitting
         return RespValue.Array(items.AsReadOnly());
     }
 
 
+    // ────────────────────────────────────────────────
+    // Low-level helpers
+    // ────────────────────────────────────────────────
     private async Task<string> ReadLineAsync(CancellationToken ct)
     {
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(64);
 
         while (true)
         {
             int b = await ReadByteAsync(ct);
+
             if (b == '\r')
             {
-                await ReadByteAsync(ct); // \n
+                // Expect \n
+                int next = await ReadByteAsync(ct);
+                if (next != '\n')
+                    throw new IOException("Expected \\n after \\r");
                 break;
             }
 
@@ -98,7 +119,7 @@ public sealed class RespReader
         {
             int read = await _stream.ReadAsync(buffer.AsMemory(offset), ct);
             if (read == 0)
-                throw new IOException("Unexpected end of stream");
+                throw new IOException("Unexpected end of stream while reading exact bytes");
 
             offset += read;
         }
@@ -112,10 +133,10 @@ public sealed class RespReader
 
     private async Task<int> ReadByteAsync(CancellationToken ct)
     {
-        int read = await _stream.ReadAsync(_buffer, ct);
+        int read = await _stream.ReadAsync(_singleByteBuffer.AsMemory(0, 1), ct);
         if (read == 0)
             throw new IOException("Unexpected end of stream");
 
-        return _buffer[0];
+        return _singleByteBuffer[0];
     }
 }

@@ -2,50 +2,81 @@
 
 namespace DevCache.Common;
 
+/// <summary>
+/// Writes RESP2 protocol to a stream (server → client direction)
+/// </summary>
 public sealed class RespWriter
 {
-    private static readonly byte[] CrLf = "\r\n"u8.ToArray();
+    private static readonly byte[] CrLf = [(byte)'\r', (byte)'\n'];
 
-    public async Task WriteAsync(Stream stream, RespValue value, CancellationToken ct = default)
+    private readonly Stream _stream;
+
+    public RespWriter(Stream stream)
     {
-        await WriteValueAsync(stream, value, ct);
-        await stream.FlushAsync(ct);
+        _stream = stream ?? throw new ArgumentNullException(nameof(stream));
     }
 
-    private async Task WriteValueAsync(Stream stream, RespValue value, CancellationToken ct)
+    public async Task WriteAsync(RespValue value, CancellationToken ct = default)
+    {
+        await WriteValueAsync(value, ct);
+        await _stream.FlushAsync(ct);
+    }
+
+    private async Task WriteValueAsync(RespValue value, CancellationToken ct)
     {
         switch (value.Type)
         {
             case RespType.SimpleString:
-                await WriteAsync(stream, $"+{value.Value}\r\n", ct);
+                await WriteAsync($"+{value.Value}\r\n", ct);
                 break;
 
             case RespType.Error:
-                await WriteAsync(stream, $"-{value.Value}\r\n", ct);
+                await WriteAsync($"-{value.Value}\r\n", ct);
                 break;
 
             case RespType.Integer:
-                await WriteAsync(stream, $":{value.Value}\r\n", ct);
+                await WriteAsync($":{value.Value}\r\n", ct);
                 break;
 
-            case RespType.Bulk:
-                var str = (string)value.Value!;
-                await WriteAsync(stream, $"${Encoding.UTF8.GetByteCount(str)}\r\n{str}\r\n", ct);
+            case RespType.BulkString:
+                string s = (string)(value.Value ?? "");
+                byte[] bytes = Encoding.UTF8.GetBytes(s);
+                await WriteAsync($"${bytes.Length}\r\n", ct);
+                await _stream.WriteAsync(bytes, ct);
+                await _stream.WriteAsync(CrLf, ct);
+                break;
+
+            case RespType.NullBulk:
+                await WriteAsync("$-1\r\n", ct);
                 break;
 
             case RespType.Array:
                 var items = (IReadOnlyList<RespValue>)value.Value!;
-                await WriteAsync(stream, $"*{items.Count}\r\n", ct);
+                await WriteAsync($"*{items.Count}\r\n", ct);
                 foreach (var item in items)
-                    await WriteValueAsync(stream, item, ct);
+                    await WriteValueAsync(item, ct);
                 break;
 
-            case RespType.Null:
-                await WriteAsync(stream, "$-1\r\n", ct);
+            case RespType.NullArray:
+                await WriteAsync("*-1\r\n", ct);
                 break;
+
+            default:
+                throw new ArgumentOutOfRangeException(nameof(value.Type));
         }
     }
 
-    private static async Task WriteAsync(Stream stream, string text, CancellationToken ct)
-        => await stream.WriteAsync(Encoding.UTF8.GetBytes(text), ct);
+    private async Task WriteAsync(string text, CancellationToken ct)
+    {
+        byte[] bytes = Encoding.UTF8.GetBytes(text);
+        await _stream.WriteAsync(bytes, ct);
+    }
+
+    public async Task WriteManyAsync(IEnumerable<RespValue> values, CancellationToken ct = default)
+    {
+        foreach (var v in values)
+            await WriteValueAsync(v, ct);
+
+        await _stream.FlushAsync(ct);
+    }
 }

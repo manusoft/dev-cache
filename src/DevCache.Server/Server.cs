@@ -1,5 +1,7 @@
-﻿using DevCache.Core;
-using DevCache.Common;
+﻿using DevCache.Common;
+using DevCache.Core;
+using DevCache.Core.Commands;
+using DevCache.Core.Storage;
 using System.Net;
 using System.Net.Sockets;
 
@@ -38,50 +40,75 @@ public sealed class Server : IDisposable
 
     private async Task HandleClientAsync(TcpClient client, CancellationToken token)
     {
-        using var stream = client.GetStream();
+        await using var stream = client.GetStream();
 
         var reader = new RespReader(stream);
-        var writer = new RespWriter();
+        var writer = new RespWriter(stream);
 
         try
         {
-            while (true)
+            while (!token.IsCancellationRequested)
             {
-                var request = await reader.ReadAsync();
+                var request = await reader.ReadAsync(token);
                 if (request == null)
-                    break; // client disconnected
-
-                // Expect array: [command, arg1, arg2...]
-                if (request.Type != RespType.Array)
                 {
-                    _logger.LogError("Protocol error: expected array");
+                    // client disconnected gracefully
+                    break;
+                }
 
-                    await writer.WriteAsync(stream,
-                        RespValue.Error("Protocol error: expected array"));
+                // Expect array: *N \r\n $cmd \r\n ... 
+                if (request.Type != RespType.Array || request.Value is not IReadOnlyList<RespValue> items || items.Count == 0)
+                {
+                    await writer.WriteAsync(
+                        RespValue.Error("Protocol error: expected non-empty array"),
+                        token
+                    );
                     continue;
                 }
 
-                var items = (IReadOnlyList<RespValue>)request.Value!;
-                var commandName = ((string?)items[0].Value)?.ToUpperInvariant();
+                var cmdResp = items[0];
+                if (cmdResp.Type != RespType.BulkString && cmdResp.Type != RespType.SimpleString)
+                {
+                    await writer.WriteAsync(
+                        RespValue.Error("Protocol error: command must be string"),
+                        token
+                    );
+                    continue;
+                }
 
-                _logger.LogInformation($"Command Received: {commandName}");
-
+                var commandName = (cmdResp.Value as string)?.ToUpperInvariant();
                 if (string.IsNullOrWhiteSpace(commandName))
                 {
-                    await writer.WriteAsync(stream,
-                        RespValue.Error("ERR empty command"));
+                    await writer.WriteAsync(
+                        RespValue.Error("ERR empty command"),
+                        token
+                    );
                     continue;
                 }
 
-                var args = items
-                    .Skip(1)
-                    .Select(v => (string?)v.Value ?? string.Empty)
-                    .ToList();
+                _logger.LogInformation("Command: {Command}", commandName);
 
-                if (!CommandRegistry.TryGet(commandName, out var command))
+                var args = new List<string>(items.Count - 1);
+
+                for (int i = 1; i < items.Count; i++)
                 {
-                    await writer.WriteAsync(stream,
-                        RespValue.Error($"ERR unknown command '{commandName}'"));
+                    var arg = items[i];
+                    if (arg.Type == RespType.BulkString || arg.Type == RespType.SimpleString)
+                    {
+                        args.Add(arg.Value as string ?? string.Empty);
+                    }
+                    else
+                    {
+                        args.Add(string.Empty); // fallback – or you can reject
+                    }
+                }
+
+                if (!CommandRegistry.TryGet(commandName, out var commandHandler))
+                {
+                    await writer.WriteAsync(
+                        RespValue.Error($"ERR unknown command '{commandName}'"),
+                        token
+                    );
                     continue;
                 }
 
@@ -92,17 +119,34 @@ public sealed class Server : IDisposable
                     Writer = writer
                 };
 
-                await command(context, args);
+                try
+                {
+                    await commandHandler(context, args);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error executing command {Command}", commandName);
+
+                    await writer.WriteAsync(
+                        RespValue.Error($"ERR internal error: {ex.Message}"),
+                        token
+                    );
+                }
 
             }
         }
+        catch (OperationCanceledException)
+        {
+            // normal shutdown
+        }
         catch (Exception ex)
         {
-            _logger.LogCritical($"Client error: {ex.Message}");
+            _logger.LogError(ex, "Client handling failed");
         }
         finally
         {
-            client.Close();
+            // No need to call client.Close() when using await using on stream
+            // TcpClient will be disposed when it goes out of scope
         }
     }
 
