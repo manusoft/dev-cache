@@ -1,6 +1,7 @@
 ﻿using DevCache.Common;
 using DevCache.Core;
 using DevCache.Core.Commands;
+using DevCache.Core.Models;
 using DevCache.Core.Storage;
 using System.Net;
 using System.Net.Sockets;
@@ -13,29 +14,44 @@ public sealed class Server : IDisposable
     private readonly IConfiguration _config;
     private TcpListener? _listener;
     private readonly InMemoryStore _store = new();
+    private readonly DateTime _startedAt = DateTime.UtcNow;
+
+    public string Bind { get; }
+    public int Port { get; }
 
     public Server(IConfiguration config, ILogger logger)
     {
         _config = config;
-        _logger =logger;
-        CommandRegistry.Initialize(_store);
+        _logger =logger;       
+
+        Bind = _config["DevCache:BindAddress"] ?? "127.0.0.1";
+        Port = _config.GetValue<int>("DevCache:Port", 6380);
+
+        CommandRegistry.Initialize(_store, GetRuntimeInfo());
     }
 
     public async Task StartAsync(CancellationToken token)
     {
-        var bind = _config["DevCache:BindAddress"] ?? "127.0.0.1";
-        var port = _config.GetValue<int>("DevCache:Port", 6380);
-
-        _listener = new TcpListener(IPAddress.Parse(bind), port);
+        _listener = new TcpListener(IPAddress.Parse(Bind), Port);
         _listener.Start();
 
-        _logger.LogInformation($"DevCache listening on {bind}:{port}");
+        _logger.LogInformation($"DevCache listening on {Bind}:{Port}");
 
         while (!token.IsCancellationRequested)
         {
             var client = await _listener.AcceptTcpClientAsync(token);
             _ = HandleClientAsync(client, token);   // pass token if you want to propagate
         }
+    }
+
+    public ServerRuntimeInfo GetRuntimeInfo()
+    {
+        return new ServerRuntimeInfo(
+            Port: Port,
+            StartedAt: _startedAt,
+            ConfigFile: null, //_config["DevCache:ConfigFile"], // if you have such setting
+            MaxMemoryBytes: 0 // or read from config later
+        );
     }
 
     private async Task HandleClientAsync(TcpClient client, CancellationToken token)
@@ -87,6 +103,8 @@ public sealed class Server : IDisposable
                 }
 
                 _logger.LogInformation("Command: {Command}", commandName);
+
+                CommandRegistry.Store.IncrementCommandsProcessed();
 
                 var args = new List<string>(items.Count - 1);
 

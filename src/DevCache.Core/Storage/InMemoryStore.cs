@@ -23,6 +23,11 @@ public sealed partial class InMemoryStore : IDisposable
     private long _totalTtlSumMs;
     private long _ttlSampleCount;
 
+    // For OPS/sec calculation
+    private long _commandsInCurrentSecond;
+    private long _opsPerSecSnapshot;
+    private DateTime _lastOpsSnapshot = DateTime.UtcNow;
+
     public long KeyCount => _data.Count;
 
     private readonly AofPersistence _aof;
@@ -81,7 +86,22 @@ public sealed partial class InMemoryStore : IDisposable
     // ---------------- Statistics ----------------
     public void IncrementHit() => Interlocked.Increment(ref _keyspaceHits);
     public void IncrementMiss() => Interlocked.Increment(ref _keyspaceMisses);
-    public void IncrementCommandsProcessed() => Interlocked.Increment(ref _totalCommandsProcessed);
+    public void IncrementCommandsProcessed() 
+    {
+        Interlocked.Increment(ref _totalCommandsProcessed);
+
+        var now = DateTime.UtcNow;
+        if ((now - _lastOpsSnapshot).TotalSeconds >= 1.0)
+        {
+            _opsPerSecSnapshot = Interlocked.Exchange(ref _commandsInCurrentSecond, 0);
+            _lastOpsSnapshot = now;
+        }
+
+        Interlocked.Increment(ref _commandsInCurrentSecond);
+    }
+
+    public long InstantaneousOpsPerSec => _opsPerSecSnapshot;
+
     public void IncrementExpiredKeys() => Interlocked.Increment(ref _expiredKeys);
     public void IncrementEvictedKeys() => Interlocked.Increment(ref _evictedKeys);
 
@@ -129,6 +149,7 @@ public sealed partial class InMemoryStore : IDisposable
     public long ExpiredKeys => Interlocked.Read(ref _expiredKeys);
     public long EvictedKeys => Interlocked.Read(ref _evictedKeys);
 
+    public long AofFileSizeBytes => _aof.CurrentAofSize;
 
     // ---------------- Commands ----------------
     public bool Set(string key, string value, bool persist = true)

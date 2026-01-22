@@ -418,6 +418,15 @@ public sealed class AofPersistence : IDisposable
         _needsFlush = false;
     }
 
+    public long CurrentAofSize
+    {
+        get
+        {
+            try { return File.Exists(_aofPath) ? new FileInfo(_aofPath).Length : 0; }
+            catch { return 0; }
+        }
+    }
+
     private static async Task WriteRespArrayAsync(StreamWriter w, string cmd, params string[] args)
     {
         await w.WriteLineAsync($"*{args.Length + 1}");

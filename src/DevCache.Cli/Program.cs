@@ -177,17 +177,17 @@ internal class Program
         await client.ConnectAsync(host, port, ct);
         await using var stream = client.GetStream();
 
-        var writer = new RespWriter();
+        var writer = new RespWriter(stream);
         var reader = new RespReader(stream);
 
         var cmdList = parts.ToList();
         string cmdName = cmdList[0].ToUpperInvariant();
         var args = cmdList.Skip(1).ToList();
 
-        var respItems = new List<RespValue> { RespValue.Bulk(cmdName) };
-        respItems.AddRange(args.Select(RespValue.Bulk));
+        var respItems = new List<RespValue> { RespValue.BulkString(cmdName) };
+        respItems.AddRange(args.Select(RespValue.BulkString));
 
-        await writer.WriteAsync(stream, RespValue.Array(respItems.AsReadOnly()), ct);
+        await writer.WriteAsync(RespValue.Array(respItems.AsReadOnly()), ct);
 
         var response = await reader.ReadAsync(ct);
         PrintResponse(response);
@@ -283,7 +283,7 @@ internal class Program
                 Console.ResetColor();
                 break;
 
-            case RespType.Bulk:
+            case RespType.BulkString:
                 Console.WriteLine(resp.Value ?? "(nil)");
                 break;
 
@@ -302,7 +302,7 @@ internal class Program
                 }
                 break;
 
-            case RespType.Null:
+            case RespType.NullBulk:
                 Console.WriteLine("(nil)");
                 break;
 
@@ -316,7 +316,7 @@ internal class Program
     {
         return v.Type switch
         {
-            RespType.Bulk => v.Value?.ToString() ?? "(nil)",
+            RespType.BulkString => v.Value?.ToString() ?? "(nil)",
             RespType.SimpleString => v.Value?.ToString() ?? "",
             RespType.Integer => v.Value?.ToString() ?? "0",
             _ => $"<{v.Type}>"

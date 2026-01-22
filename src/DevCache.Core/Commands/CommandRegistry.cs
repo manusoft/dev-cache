@@ -2,6 +2,7 @@
 using DevCache.Core.Helpers;
 using DevCache.Core.Models;
 using DevCache.Core.Storage;
+using System.Net;
 
 namespace DevCache.Core.Commands;
 
@@ -9,6 +10,7 @@ public static class CommandRegistry
 {
     private static readonly Dictionary<string, RedisCommand> _commands;
     private static InMemoryStore? _store;
+    private static ServerRuntimeInfo? _runtimeInfo;
 
     public static InMemoryStore Store => _store
         ?? throw new InvalidOperationException("Store not initialized");
@@ -23,6 +25,7 @@ public static class CommandRegistry
             // Core
             ["PING"] = PingAsync,
             ["ECHO"] = EchoAsync,
+            ["INFO"] = InfoAsync,
 
             // KV (Strings)
             ["SET"] = SetAsync,
@@ -61,10 +64,11 @@ public static class CommandRegistry
         };
     }
 
-    public static void Initialize(InMemoryStore store)
+    public static void Initialize(InMemoryStore store, ServerRuntimeInfo runtimeInfo)
     {
         if (_store != null) throw new InvalidOperationException("Already initialized");
         _store = store;
+        _runtimeInfo = runtimeInfo;
     }
 
     // ---------------- Core ----------------
@@ -92,6 +96,32 @@ public static class CommandRegistry
         await ctx.Writer.WriteAsync(RespValue.BulkString(args[0]));
     }
 
+    private static async Task InfoAsync(CommandContext ctx, IReadOnlyList<string> args)
+    {
+        string section;
+
+        switch (args.Count)
+        {
+            case 0:
+                section = "all";
+                break;
+
+            case 1:
+                section = args[0].ToLowerInvariant();
+                break;
+
+            default:
+                await ctx.Writer.WriteAsync(
+                    RespValue.Error("ERR wrong number of arguments for 'info' command")
+                );
+                return;
+        }
+
+        var handler = new InfoCommandHandler(CommandRegistry.Store, CommandRegistry._runtimeInfo!);
+        string result = handler.Execute(new[] { section });
+
+        await ctx.Writer.WriteAsync(RespValue.BulkString(result));
+    }
 
     // ---------------- KV (Strings) ----------------
     private static async Task SetAsync(CommandContext ctx, IReadOnlyList<string> args)
