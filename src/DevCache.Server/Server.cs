@@ -66,9 +66,11 @@ public sealed class Server : IDisposable
             while (!token.IsCancellationRequested)
             {
                 var request = await reader.ReadAsync(token);
+
+                // Normal disconnect: client closed connection → ReadAsync returns null
                 if (request == null)
                 {
-                    // client disconnected gracefully
+                    _logger.LogInformation("Client disconnected normally (EOF).");
                     break;
                 }
 
@@ -153,18 +155,26 @@ public sealed class Server : IDisposable
 
             }
         }
+        catch (IOException ex) when (ex.InnerException is SocketException { SocketErrorCode: SocketError.ConnectionReset or SocketError.ConnectionAborted })
+        {
+            // Friendly handling for common disconnect scenarios
+            _logger.LogInformation("Client {RemoteEndPoint} disconnected normally.", client.Client.RemoteEndPoint);
+        }
         catch (OperationCanceledException)
         {
             // normal shutdown
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Client handling failed");
+            // Unexpected error — log full details
+            _logger.LogError(ex, "Unexpected client handling error");
         }
         finally
         {
             // No need to call client.Close() when using await using on stream
             // TcpClient will be disposed when it goes out of scope
+            //client.Close();
+            //_logger.LogDebug("Client connection closed.");
         }
     }
 

@@ -6,6 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
 	<AssemblyName>devcache-server</AssemblyName>
     <UserSecretsId>Manuhub-DevCache.Server-7ce3fe59-d258-4b88-bd83-88d58ef3a173</UserSecretsId>
+	<PublishSingleFile>true</PublishSingleFile>
   </PropertyGroup>
 
   <ItemGroup>

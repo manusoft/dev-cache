@@ -2,13 +2,12 @@
 
 internal class DevCacheAutoCompleteHandler : IAutoCompleteHandler
 {
-    // Characters that separate words/tokens for completion
-    // Common for Redis-style commands: space is the main separator
+    // Separators for splitting words (space is primary for Redis-style commands)
     public char[] Separators { get; set; } = new char[] { ' ' };
 
-    // This method is called when user presses Tab
-    // text     = full current input line
-    // index    = cursor position in the line
+    /// <summary>
+    /// Called when user presses Tab. Returns suggestions based on current input.
+    /// </summary>
     public string[]? GetSuggestions(string text, int index)
     {
         if (string.IsNullOrWhiteSpace(text))
@@ -19,88 +18,174 @@ internal class DevCacheAutoCompleteHandler : IAutoCompleteHandler
         if (tokens.Length == 0)
             return null;
 
-        string currentToken = tokens.Last(); // the word being typed right now
-        string commandPrefix = tokens[0].ToUpperInvariant(); // first word = command
+        string currentToken = tokens[^1]; // last token (being typed)
+        string commandPrefix = tokens[0].ToUpperInvariant(); // first token = command
 
-        // Case 1: User is typing the command itself (first word)
+        // Case 1: User is typing the command name itself
         if (tokens.Length == 1 && !text.EndsWith(" "))
         {
-            var possibleCommands = GetAllSupportedCommands()
+            return GetAllSupportedCommands()
                 .Where(c => c.StartsWith(currentToken, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(c => c)
                 .ToArray();
-
-            if (possibleCommands.Length > 0)
-                return possibleCommands;
         }
 
         // Case 2: User is typing arguments after a known command
-        // Provide context-aware suggestions where it makes sense
-        switch (commandPrefix)
+        return commandPrefix switch
         {
-            case "SET":
-            case "GET":
-            case "DEL":
-            case "EXISTS":
-            case "EXPIRE":
-            case "TTL":
-            case "GETMETA":
-                // Suggest existing keys (you can fetch them dynamically if you want)
-                // For now: use a static list or recent keys from history
-                var possibleKeys = GetKnownKeys()
-                    .Where(k => k.StartsWith(currentToken, StringComparison.OrdinalIgnoreCase))
-                    .ToArray();
-
-                if (possibleKeys.Length > 0)
-                    return possibleKeys;
-                break;
-
-            case "KEYS":
-                // Common patterns
-                if (currentToken == "" || currentToken == "*")
-                    return new[] { "*" };
-                break;
-
-            case "PING":
-            case "ECHO":
-                // Could suggest example messages, but usually not needed
-                break;
-        }
-
-        return null; // no suggestions
+            "INFO" => SuggestInfoSections(currentToken),
+            "CONFIG" => SuggestConfigSubcommands(tokens, currentToken),
+            "KEYS" => SuggestKeysPatterns(currentToken),
+            "SET" or "GET" or "DEL" or "EXISTS" or "EXPIRE" or "PEXPIRE" or "TTL" or "PTTL" or "GETMETA" or "TYPE"
+                       => SuggestKeys(currentToken),
+            "LPUSH" or "RPUSH" or "HSET" or "HGET" or "HDEL" or "HKEYS" or "HVALS"
+                       => SuggestKeysOrFields(commandPrefix, currentToken, tokens),
+            "INCR" or "DECR" or "INCRBY"
+                       => SuggestCounters(currentToken),
+            _ => null // no suggestions for unknown commands
+        };
     }
 
-    // Helper: list of all commands your server supports
+    // ────────────────────────────────────────────────
+    // Helpers: Command list (keep in sync with CommandRegistry)
+    // ────────────────────────────────────────────────
     private static IEnumerable<string> GetAllSupportedCommands()
     {
         yield return "PING";
         yield return "ECHO";
+        yield return "INFO";
+        yield return "CONFIG";
+        yield return "ROLE";
+        yield return "CLIENT";
         yield return "SET";
         yield return "GET";
         yield return "DEL";
         yield return "EXISTS";
+        yield return "INCR";
+        yield return "DECR";
+        yield return "INCRBY";
         yield return "EXPIRE";
         yield return "TTL";
-        yield return "KEYS";
+        yield return "PEXPIRE";
+        yield return "PTTL";
         yield return "FLUSHDB";
+        yield return "KEYS";
+        yield return "TYPE";
         yield return "GETMETA";
-        // Add more as you implement new commands later
+        yield return "LPUSH";
+        yield return "RPUSH";
+        yield return "LPOP";
+        yield return "RPOP";
+        yield return "LLEN";
+        yield return "HSET";
+        yield return "HGET";
+        yield return "HDEL";
+        yield return "HLEN";
+        yield return "HKEYS";
+        yield return "HVALS";
     }
 
-    // Helper: suggest some known keys
-    // In a real app you could cache recent keys or even query the server,
-    // but for simplicity we'll use a small static list + any keys typed recently
+    // ────────────────────────────────────────────────
+    // Context-aware suggestions
+    // ────────────────────────────────────────────────
+
+    private static string[] SuggestInfoSections(string currentToken)
+    {
+        var sections = new[] { "all", "server", "memory", "keyspace", "stats", "persistence", "replication", "clients" };
+        return sections
+            .Where(s => s.StartsWith(currentToken, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+    }
+
+    private static string[] SuggestConfigSubcommands(IReadOnlyList<string> tokens, string currentToken)
+    {
+        if (tokens.Count == 1) // after "CONFIG"
+        {
+            return new[] { "GET" }
+                .Where(s => s.StartsWith(currentToken, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+        }
+
+        if (tokens.Count >= 2 && tokens[1].Equals("GET", StringComparison.OrdinalIgnoreCase))
+        {
+            // Suggest common config keys
+            var commonKeys = new[]
+            {
+                "port", "bind", "maxmemory", "maxmemory-policy", "timeout",
+                "databases", "appendonly", "requirepass", "protected-mode",
+                "hz", "tcp-keepalive"
+            };
+            return commonKeys
+                .Where(k => k.StartsWith(currentToken, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+        }
+
+        return Array.Empty<string>();
+    }
+
+    private static string[] SuggestKeysPatterns(string currentToken)
+    {
+        var patterns = new[] { "*", "user:*", "session:*", "counter*", "temp*" };
+        return patterns
+            .Where(p => p.StartsWith(currentToken, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+    }
+
+    private static string[] SuggestKeys(string currentToken)
+    {
+        // Static known keys + dynamic from history (simple version)
+        var known = GetKnownKeys()
+            .Where(k => k.StartsWith(currentToken, StringComparison.OrdinalIgnoreCase));
+
+        // Optional: collect from recent successful KEYS commands (future improvement)
+        return known.ToArray();
+    }
+
+    private static string[] SuggestKeysOrFields(string command, string currentToken, IReadOnlyList<string> tokens)
+    {
+        // If first argument (key) → suggest keys
+        if (tokens.Count == 1 || (tokens.Count == 2 && !tokens[1].EndsWith(" ")))
+        {
+            return SuggestKeys(currentToken);
+        }
+
+        // For hashes (field suggestions) – static for now
+        if (command.StartsWith("H"))
+        {
+            var fields = new[] { "name", "age", "email", "status", "score" };
+            return fields
+                .Where(f => f.StartsWith(currentToken, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+        }
+
+        return Array.Empty<string>();
+    }
+
+    private static string[] SuggestCounters(string currentToken)
+    {
+        // Counters usually have names like "visits", "views", "likes", "counter"
+        var counters = new[] { "counter", "visits", "views", "likes", "hits", "users:online" };
+        return counters
+            .Where(c => c.StartsWith(currentToken, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+    }
+
+    // ────────────────────────────────────────────────
+    // Static helpers (expand as needed)
+    // ────────────────────────────────────────────────
     private static IEnumerable<string> GetKnownKeys()
     {
-        // Static examples — you can expand this
+        // Static examples — expand this list over time
         yield return "mykey";
         yield return "hello";
         yield return "counter";
         yield return "user:123";
-        yield return "mycity";
-        yield return "citykey";
+        yield return "session:abc123";
+        yield return "visits";
+        yield return "views";
+        yield return "likes";
         yield return "temp";
-
-        // Bonus: you could collect keys from previous successful KEYS * responses
-        // (would require storing them in a static list or field)
+        yield return "config:test";
+        yield return "cache:home";
     }
 }

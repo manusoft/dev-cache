@@ -9,7 +9,7 @@
 	<ApplicationIcon>appicon.ico</ApplicationIcon>
 	<Copyright>Manuhub © 2026</Copyright>
 	<Description>DeveCache Command line app.</Description>
-	<PackageIcon></PackageIcon>
+	<PublishSingleFile>true</PublishSingleFile>
   </PropertyGroup>
 
   <ItemGroup>

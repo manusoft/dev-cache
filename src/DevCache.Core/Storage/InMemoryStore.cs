@@ -2,6 +2,8 @@
 using DevCache.Core.Persistence;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Formats.Tar;
+using System.Globalization;
 
 namespace DevCache.Core.Storage;
 
@@ -189,14 +191,86 @@ public sealed partial class InMemoryStore : IDisposable
 
     public bool Exists(string key) => GetEntry(key) != null;
 
-    public void FlushAll()
+    public long Incr(string key, long increment)
+    {
+        var entry = GetEntry(key); // this already handles expiry
+
+        if (entry == null)
+        {
+            // Key didn't exist → start from 0
+            var newEntry = new StringEntry { Value = increment.ToString() };
+            _data[key] = newEntry;
+            _aof.AppendCommand("INCRBY", key, increment.ToString());
+            return increment;
+        }
+
+        if (entry is not StringEntry strEntry)
+        {
+            throw new InvalidOperationException("WRONGTYPE Operation against a key holding the wrong kind of value");
+        }
+
+        // Key exists and is a string → must be parseable as integer
+        if (!long.TryParse(strEntry.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out long current))
+        {
+            throw new InvalidOperationException("WRONGTYPE Operation against a key holding the wrong kind of value");
+        }
+
+        long newValue = current + increment;
+
+        // Update value
+        strEntry.Value = newValue.ToString(CultureInfo.InvariantCulture);
+
+        // Persist
+        _aof.AppendCommand("INCRBY", key, increment.ToString());
+
+        return newValue;
+    }
+
+    //public void FlushAll()
+    //{
+    //    _data.Clear();
+    //    _keysWithExpiry = 0;
+    //    _totalTtlSumMs = 0;
+    //    _ttlSampleCount = 0;
+
+    //    _aof.FlushAndReset();
+    //}
+
+    /// <summary>
+    /// Clears all keys in the current database (db0) and logs FLUSHDB to AOF.
+    /// </summary>
+    public void FlushDb()
     {
         _data.Clear();
+
+        // Reset expiry-related counters
         _keysWithExpiry = 0;
         _totalTtlSumMs = 0;
         _ttlSampleCount = 0;
 
-        _aof.FlushAndReset();
+        // Optional: reset other stats if desired
+        // _keyspaceHits = 0;
+        // _keyspaceMisses = 0;
+        // etc.
+
+        // IMPORTANT: just append the command — do NOT reset the AOF file
+        _aof.AppendCommand("FLUSHDB");
+
+        Debug.WriteLine("[FlushDb] Database cleared. FLUSHDB appended to AOF.");
+    }
+
+    /// <summary>
+    /// Clears all keys (currently same as FlushDb since only one db).
+    /// Logs FLUSHALL to AOF for future multi-db support.
+    /// </summary>
+    public void FlushAll()
+    {
+        FlushDb(); // Reuse logic
+
+        // Append FLUSHALL instead (Redis-compatible)
+        _aof.AppendCommand("FLUSHALL");
+
+        Debug.WriteLine("[FlushAll] All databases cleared. FLUSHALL appended to AOF.");
     }
 
     public bool Expire(string key, long milliseconds, bool persist = true)

@@ -26,12 +26,18 @@ public static class CommandRegistry
             ["PING"] = PingAsync,
             ["ECHO"] = EchoAsync,
             ["INFO"] = InfoAsync,
+            ["CONFIG"] = ConfigAsync,
+            ["ROLE"] = RoleAsync,
+            ["CLIENT"] = ClientAsync,
 
             // KV (Strings)
             ["SET"] = SetAsync,
             ["GET"] = GetAsync,
             ["DEL"] = DelAsync,
             ["EXISTS"] = ExistsAsync,
+            ["INCR"] = IncrAsync,
+            ["DECR"] = DecrAsync,
+            ["INCRBY"] = IncrByAsync,
 
             // TTL
             ["EXPIRE"] = ExpireAsync,
@@ -41,6 +47,7 @@ public static class CommandRegistry
 
             // DB
             ["FLUSHDB"] = FlushDbAsync,
+            ["FLUSHALL"] = FlushAllAsync,
 
             // UI / Introspection
             ["KEYS"] = KeysAsync,
@@ -53,6 +60,7 @@ public static class CommandRegistry
             ["LPOP"] = LPopAsync,
             ["RPOP"] = RPopAsync,
             ["LLEN"] = LLenAsync,
+            ["LRANGE"] = LRangeAsync,
 
             // Hashes
             ["HSET"] = HSetAsync,
@@ -60,7 +68,8 @@ public static class CommandRegistry
             ["HDEL"] = HDelAsync,
             ["HLEN"] = HLenAsync,
             ["HKEYS"] = HKeysAsync,
-            ["HVALS"] = HValsAsync,
+            ["HVALS"] = HValsAsync,            
+
         };
     }
 
@@ -121,6 +130,158 @@ public static class CommandRegistry
         string result = handler.Execute(new[] { section });
 
         await ctx.Writer.WriteAsync(RespValue.BulkString(result));
+    }
+
+    private static async Task ConfigAsync(CommandContext ctx, IReadOnlyList<string> args)
+    {
+        if (args.Count == 0)
+        {
+            await ctx.Writer.WriteAsync(
+                RespValue.Error("ERR wrong number of arguments for 'config' command")
+            );
+            return;
+        }
+
+        string subcmd = args[0].ToUpperInvariant();
+
+        if (subcmd == "GET")
+        {
+            if (args.Count < 2)
+            {
+                await ctx.Writer.WriteAsync(RespValue.Error("ERR wrong number of arguments for 'config get'"));
+                return;
+            }
+
+            var result = new List<RespValue>();
+
+            // Special case: CONFIG GET *
+            if (args.Count == 2 && args[1] == "*")
+            {
+                var allKeys = new[]
+                {
+                    "port", "bind", "maxmemory", "maxmemory-policy", "timeout",
+                    "databases", "appendonly", "aof-enabled", "requirepass",
+                    "protected-mode", "tcp-keepalive", "hz"
+                };
+
+                foreach (var k in allKeys)
+                {
+                    string? val = GetConfigValue(k);
+                    result.Add(RespValue.BulkString(k));
+                    result.Add(RespValue.BulkString(val ?? "(nil)"));
+                }
+            }
+            else
+            {
+                // Normal case: one or more explicit keys
+                for (int i = 1; i < args.Count; i++)
+                {
+                    string key = args[i].ToLowerInvariant();
+                    string? val = GetConfigValue(key);
+
+                    result.Add(RespValue.BulkString(key));
+                    result.Add(RespValue.BulkString(val ?? "(nil)"));
+                }
+            }
+
+            await ctx.Writer.WriteAsync(RespValue.Array(result.AsReadOnly()));
+        }
+        else if (subcmd == "SET")
+        {
+            await ctx.Writer.WriteAsync(
+                RespValue.Error("ERR CONFIG SET is not supported yet")
+            );
+        }
+        else if (subcmd == "RESETSTAT")
+        {
+            // Optional – reset some counters
+            await ctx.Writer.WriteAsync(RespValue.SimpleString("OK"));
+        }
+        else
+        {
+            await ctx.Writer.WriteAsync(
+                RespValue.Error($"ERR Unknown subcommand or wrong number of arguments for 'CONFIG|config {subcmd}'")
+            );
+        }
+    }
+
+    private static async Task RoleAsync(CommandContext ctx, IReadOnlyList<string> args)
+    {
+        if (args.Count != 0)
+        {
+            await ctx.Writer.WriteAsync(RespValue.Error("ERR wrong number of arguments for 'role' command"));
+            return;
+        }
+
+        // Build the reply array:
+        // 1) role as simple string
+        // 2) replication offset (integer) — fake 0 for now
+        // 3) list of connected replicas — empty array for now
+        var reply = new List<RespValue>
+        {
+            RespValue.SimpleString("master"),
+            RespValue.Integer(0),                              // master_repl_offset
+            RespValue.Array(Array.Empty<RespValue>()),         // connected replicas
+            RespValue.Integer(0)                               // optional: second_repl_offset (usually 0)
+        };
+
+        await ctx.Writer.WriteAsync(RespValue.Array(reply.AsReadOnly()));
+    }
+
+    private static async Task ClientAsync(CommandContext ctx, IReadOnlyList<string> args)
+    {
+        if (args.Count == 0)
+        {
+            await ctx.Writer.WriteAsync(
+                RespValue.Error("ERR wrong number of arguments for 'client' command")
+            );
+            return;
+        }
+
+        string subcmd = args[0].ToUpperInvariant();
+
+        if (subcmd == "LIST")
+        {
+            // Very basic fake output - pretend there is one active client
+            // Format matches real Redis client list line
+            var now = DateTimeOffset.UtcNow;
+            long ageSeconds = (long)(now - ctx.ConnectedAt).TotalSeconds;
+
+            string clientInfo =
+                $"id=1 " +
+                $"addr={ctx.Client.Client.RemoteEndPoint?.ToString() ?? "unknown:0"} " +
+                $"fd=8 " +                           // fake file descriptor
+                $"name= " +                          // client name (empty if not set)
+                $"age={ageSeconds} " +
+                $"idle=0 " +                         // idle time in seconds
+                $"flags=N " +                        // N = normal client
+                $"db=0 " +
+                $"sub=0 " +
+                $"psub=0 " +
+                $"qbuf=0 " +
+                $"qbuf-free=0 " +
+                $"obl=0 " +
+                $"oll=0 " +
+                $"omem=0 " +
+                $"events=r " +                       // r = readable
+                $"cmd=client " +                     // last command
+                $"user=default " +
+                $"redir=-1";
+
+            await ctx.Writer.WriteAsync(
+                RespValue.BulkString(clientInfo + "\n")
+            );
+        }
+        else if (subcmd == "GETNAME" || subcmd == "SETNAME")
+        {
+            await ctx.Writer.WriteAsync(RespValue.Error("ERR CLIENT GETNAME/SETNAME not supported yet"));
+        }
+        else
+        {
+            await ctx.Writer.WriteAsync(
+                RespValue.Error($"ERR Unsupported CLIENT subcommand or wrong number of arguments for 'CLIENT|client {subcmd}'")
+            );
+        }
     }
 
     // ---------------- KV (Strings) ----------------
@@ -247,6 +408,62 @@ public static class CommandRegistry
         await ctx.Writer.WriteAsync(RespValue.Integer(response));
     }
 
+    private static async Task IncrAsync(CommandContext ctx, IReadOnlyList<string> args)
+    {
+        if (args.Count != 1)
+        {
+            await ctx.Writer.WriteAsync(
+                RespValue.Error("ERR wrong number of arguments for 'incr' command")
+            );
+            return;
+        }
+
+        string key = args[0];
+        long newValue = CommandRegistry.Store.Incr(key, 1);
+
+        await ctx.Writer.WriteAsync(RespValue.Integer(newValue));
+    }
+
+    private static async Task DecrAsync(CommandContext ctx, IReadOnlyList<string> args)
+    {
+        if (args.Count != 1)
+        {
+            await ctx.Writer.WriteAsync(
+                RespValue.Error("ERR wrong number of arguments for 'decr' command")
+            );
+            return;
+        }
+
+        string key = args[0];
+        long newValue = CommandRegistry.Store.Incr(key, -1);
+
+        await ctx.Writer.WriteAsync(RespValue.Integer(newValue));
+    }
+
+    private static async Task IncrByAsync(CommandContext ctx, IReadOnlyList<string> args)
+    {
+        if (args.Count != 2)
+        {
+            await ctx.Writer.WriteAsync(
+                RespValue.Error("ERR wrong number of arguments for 'incrby' command")
+            );
+            return;
+        }
+
+        string key = args[0];
+        if (!long.TryParse(args[1], out long increment))
+        {
+            await ctx.Writer.WriteAsync(
+                RespValue.Error("ERR value is not an integer or out of range")
+            );
+            return;
+        }
+
+        long newValue = CommandRegistry.Store.Incr(key, increment);
+
+        await ctx.Writer.WriteAsync(RespValue.Integer(newValue));
+    }
+
     // ---------------- TTL ----------------
     private static async Task ExpireAsync(CommandContext ctx, IReadOnlyList<string> args)
     {
@@ -317,6 +534,20 @@ public static class CommandRegistry
 
         Store.FlushAll();
         await Ok(ctx);
+    }
+
+    private static async Task FlushAllAsync(CommandContext ctx, IReadOnlyList<string> args)
+    {
+        if (args.Count != 0)
+        {
+            await ctx.Writer.WriteAsync(
+                RespValue.Error("ERR wrong number of arguments for 'flushall' command")
+            );
+            return;
+        }
+
+        CommandRegistry.Store.FlushAll();
+        await ctx.Writer.WriteAsync(RespValue.SimpleString("OK"));
     }
 
     // ---------------- UI / Introspection ----------------
@@ -467,6 +698,66 @@ public static class CommandRegistry
         await ctx.Writer.WriteAsync(RespValue.Integer(len));
     }
 
+    private static async Task LRangeAsync(CommandContext ctx, IReadOnlyList<string> args)
+    {
+        if (args.Count != 3)
+        {
+            await ctx.Writer.WriteAsync(
+                RespValue.Error("ERR wrong number of arguments for 'lrange' command")
+            );
+            return;
+        }
+
+        string key = args[0];
+        if (!long.TryParse(args[1], out long start) || !long.TryParse(args[2], out long stop))
+        {
+            await ctx.Writer.WriteAsync(
+                RespValue.Error("ERR value is not an integer or out of range")
+            );
+            return;
+        }
+
+        var entry = CommandRegistry.Store.GetEntry(key);
+        if (entry == null)
+        {
+            await ctx.Writer.WriteAsync(RespValue.Array(Array.Empty<RespValue>().AsReadOnly()));
+            return;
+        }
+
+        if (entry is not ListEntry listEntry)
+        {
+            await ctx.Writer.WriteAsync(
+                RespValue.Error("WRONGTYPE Operation against a key holding the wrong kind of value")
+            );
+            return;
+        }
+
+        var values = listEntry.Values;
+
+        // Handle negative indices (Redis-style: -1 = last element)
+        if (start < 0) start = values.Count + start;
+        if (stop < 0) stop = values.Count + stop;
+
+        // Clamp to bounds
+        start = Math.Max(0, start);
+        stop = Math.Min(values.Count - 1, stop);
+
+        if (start > stop)
+        {
+            await ctx.Writer.WriteAsync(RespValue.Array(Array.Empty<RespValue>().AsReadOnly()));
+            return;
+        }
+
+        var result = values
+            .Skip((int)start)
+            .Take((int)(stop - start + 1))
+            .Select(v => RespValue.BulkString(v))
+            .ToList()
+            .AsReadOnly();
+
+        await ctx.Writer.WriteAsync(RespValue.Array(result));
+    }
+
     // ---------------- Hashes ----------------
     private static async Task HSetAsync(CommandContext ctx, IReadOnlyList<string> args)
     {
@@ -551,11 +842,42 @@ public static class CommandRegistry
         await ctx.Writer.WriteAsync(RespValue.Array(vals));
     }
 
+
     // ---------------- Helpers ----------------
     private static Task Ok(CommandContext ctx)
         => ctx.Writer.WriteAsync(RespValue.SimpleString("OK"));
 
     private static Task Error(CommandContext ctx, string message)
         => ctx.Writer.WriteAsync(RespValue.Error(message));
+
+    private static string? GetConfigValue(string key)
+    {
+        return key switch
+        {
+            // Most common ones clients ask for
+            "port" => _runtimeInfo?.Port.ToString() ?? "6380",
+            "bind" => "127.0.0.1",  // or "*" / "0.0.0.0" if you allow all
+            "maxmemory" => "0",
+            "maxmemory-policy" => "noeviction",
+            "timeout" => "0",          // 0 = no timeout
+            "databases" => "1",          // you currently have only db0
+            "appendonly" => "yes",
+            "aof-enabled" => "yes",
+            "requirepass" => "",           // or "no" / null
+            "protected-mode" => "yes",
+            "aof-use-no-appendfsync-on-rewrite" => "no",
+
+            // Optional – nice to have
+            "tcp-keepalive" => "0",
+            "hz" => "10",
+            "loglevel" => "notice",
+            "slowlog-log-slower-than" => "10000",
+            "slowlog-max-len" => "128",
+            "lua-time-limit" => "5000",
+
+            // Unknown / not implemented
+            _ => null
+        };
+    }
 
 }

@@ -1,4 +1,6 @@
-﻿namespace DevCache.Core.Helpers;
+﻿using DevCache.Core.Commands;
+
+namespace DevCache.Core.Helpers;
 
 internal static class CommonHelper
 {
