@@ -163,8 +163,7 @@ This project explores protocol handling, concurrency, expiry, persistence, and t
 
 ## ⚠️ Disclaimer
 
-DevCache is **not intended as a Redis replacement**. It is a learning-focused project and a demonstration of systems design principles.  
-It implements a compatible wire protocol for development purposes.
+DevCache is **not intended as a Redis replacement**. It is a learning-focused project and a demonstration of systems design principles. It implements a compatible wire protocol for development purposes.
 
 ---
 
