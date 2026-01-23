@@ -226,51 +226,31 @@ public sealed partial class InMemoryStore : IDisposable
         return newValue;
     }
 
-    //public void FlushAll()
-    //{
-    //    _data.Clear();
-    //    _keysWithExpiry = 0;
-    //    _totalTtlSumMs = 0;
-    //    _ttlSampleCount = 0;
-
-    //    _aof.FlushAndReset();
-    //}
-
-    /// <summary>
-    /// Clears all keys in the current database (db0) and logs FLUSHDB to AOF.
-    /// </summary>
-    public void FlushDb()
+    public void FlushDb(bool persist = false)
     {
         _data.Clear();
-
-        // Reset expiry-related counters
         _keysWithExpiry = 0;
         _totalTtlSumMs = 0;
         _ttlSampleCount = 0;
 
-        // Optional: reset other stats if desired
-        // _keyspaceHits = 0;
-        // _keyspaceMisses = 0;
-        // etc.
+        if (persist)
+        {
+            _aof.AppendCommand("FLUSHDB");
+        }
 
-        // IMPORTANT: just append the command — do NOT reset the AOF file
-        _aof.AppendCommand("FLUSHDB");
-
-        Debug.WriteLine("[FlushDb] Database cleared. FLUSHDB appended to AOF.");
+        Debug.WriteLine("[FlushDb] Database cleared. " + (persist ? "Appended to AOF." : "No AOF append (load mode)."));
     }
 
-    /// <summary>
-    /// Clears all keys (currently same as FlushDb since only one db).
-    /// Logs FLUSHALL to AOF for future multi-db support.
-    /// </summary>
-    public void FlushAll()
+    public void FlushAll(bool persist = false)
     {
-        FlushDb(); // Reuse logic
+        FlushDb(persist);
 
-        // Append FLUSHALL instead (Redis-compatible)
-        _aof.AppendCommand("FLUSHALL");
+        if (persist)
+        {
+            _aof.AppendCommand("FLUSHALL");
+        }
 
-        Debug.WriteLine("[FlushAll] All databases cleared. FLUSHALL appended to AOF.");
+        Debug.WriteLine("[FlushAll] All cleared. " + (persist ? "Appended to AOF." : "No AOF append (load mode)."));
     }
 
     public bool Expire(string key, long milliseconds, bool persist = true)

@@ -528,25 +528,23 @@ public static class CommandRegistry
     {
         if (args.Count != 0)
         {
-            await Error(ctx, "ERR wrong number of arguments for 'flushdb' command");
+            await ctx.Writer.WriteAsync(RespValue.Error("ERR wrong number of arguments for 'flushdb' command"));
             return;
         }
 
-        Store.FlushAll();
-        await Ok(ctx);
+        CommandRegistry.Store.FlushDb(persist: true); // live → persist
+        await ctx.Writer.WriteAsync(RespValue.SimpleString("OK"));
     }
 
     private static async Task FlushAllAsync(CommandContext ctx, IReadOnlyList<string> args)
     {
         if (args.Count != 0)
         {
-            await ctx.Writer.WriteAsync(
-                RespValue.Error("ERR wrong number of arguments for 'flushall' command")
-            );
+            await ctx.Writer.WriteAsync(RespValue.Error("ERR wrong number of arguments for 'flushall' command"));
             return;
         }
 
-        CommandRegistry.Store.FlushAll();
+        CommandRegistry.Store.FlushAll(persist: true); // live → persist
         await ctx.Writer.WriteAsync(RespValue.SimpleString("OK"));
     }
 

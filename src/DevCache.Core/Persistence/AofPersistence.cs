@@ -148,6 +148,12 @@ public sealed class AofPersistence : IDisposable
             {
                 switch (cmd)
                 {
+                    case "FLUSHDB":
+                    case "FLUSHALL":
+                        _store.FlushDb(persist: false);
+                        loaded++;
+                        break;  // just count as loaded, do NOT clear anything
+
                     case "SET" when commandArgs.Count == 3:
                         _store.Set(commandArgs[1], commandArgs[2], persist: false);
                         loaded++;
@@ -204,10 +210,7 @@ public sealed class AofPersistence : IDisposable
                         loaded++;
                         break;
 
-                    case "FLUSHDB":
-                        _store.FlushAll();
-                        loaded++;
-                        break;
+                        // Add future commands here...
                 }
             }
             catch (Exception ex)
