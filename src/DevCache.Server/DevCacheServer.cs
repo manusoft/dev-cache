@@ -8,7 +8,7 @@ using System.Net.Sockets;
 
 namespace DevCache.Server;
 
-public sealed class Server : IDisposable
+public sealed class DevCacheServer : IDisposable
 {
     private readonly ILogger _logger;
     private readonly IConfiguration _config;
@@ -19,7 +19,7 @@ public sealed class Server : IDisposable
     public string Bind { get; }
     public int Port { get; }
 
-    public Server(IConfiguration config, ILogger logger)
+    public DevCacheServer(IConfiguration config, ILogger logger)
     {
         _config = config;
         _logger =logger;       
@@ -104,7 +104,8 @@ public sealed class Server : IDisposable
                     continue;
                 }
 
-                _logger.LogInformation("Command: {Command}", commandName);
+                //_logger.LogInformation("Command: {Command}", commandName);
+                _logger.LogDebug("Command: {Command}", commandName);
 
                 CommandRegistry.Store.IncrementCommandsProcessed();
 
