@@ -8,7 +8,7 @@
   IgnorableNamespaces="uap rescap">
 
   <Identity
-    Name="211560d3-f4f8-47fb-8349-b9002ea2e0b3"
+    Name="DevCache"
     Publisher="CN=8F09EC4C-C217-4E2F-BC6D-865A31F7EE04"
     Version="1.0.0.0" />
 

@@ -97,20 +97,20 @@ public partial class MainViewModel : ObservableObject
         {
             using var client = new TcpClient(Host, Port);
             using var stream = client.GetStream();
-            var writer = new RespWriter();
+            var writer = new RespWriter(stream);
             var reader = new RespReader(stream);
 
-            await writer.WriteAsync(stream, RespValue.Array(new[]
+            await writer.WriteAsync(RespValue.Array(new[]
             {
-                RespValue.Bulk("GET"),
-                RespValue.Bulk(entry.Key)
+                RespValue.BulkString("GET"),
+                RespValue.BulkString(entry.Key)
             }));
 
             var resp = await reader.ReadAsync();
             entry.Value = resp?.Type switch
             {
-                RespType.Bulk => (string?)resp.Value,
-                RespType.Null => "(nil)",
+                RespType.BulkString => (string?)resp.Value,
+                RespType.NullBulk => "(nil)",
                 _ => "(error)"
             };
 
@@ -159,14 +159,14 @@ public partial class MainViewModel : ObservableObject
         {
             using var client = new TcpClient(Host, Port);
             using var stream = client.GetStream();
-            var writer = new RespWriter();
+            var writer = new RespWriter(stream);
             var reader = new RespReader(stream);
 
-            await writer.WriteAsync(stream, RespValue.Array(new[]
+            await writer.WriteAsync(RespValue.Array(new[]
             {
-                RespValue.Bulk("EXPIRE"),
-                RespValue.Bulk(SelectedEntry.Key),
-                RespValue.Bulk(seconds.ToString())
+                RespValue.BulkString("EXPIRE"),
+                RespValue.BulkString(SelectedEntry.Key),
+                RespValue.BulkString(seconds.ToString())
             }));
 
             var response = await reader.ReadAsync();
@@ -212,14 +212,14 @@ public partial class MainViewModel : ObservableObject
             using var client = new TcpClient(Host, Port);
             using var stream = client.GetStream();
 
-            var writer = new RespWriter();
+            var writer = new RespWriter(stream);
             var reader = new RespReader(stream);
 
             // Send KEYS *
-            await writer.WriteAsync(stream, RespValue.Array(new[]
+            await writer.WriteAsync(RespValue.Array(new[]
             {
-                RespValue.Bulk("KEYS"),
-                RespValue.Bulk("*")
+                RespValue.BulkString("KEYS"),
+                RespValue.BulkString("*")
             }));
 
             var response = await reader.ReadAsync();
@@ -229,14 +229,14 @@ public partial class MainViewModel : ObservableObject
 
             foreach (var keyResp in keys)
             {
-                if (keyResp.Type != RespType.Bulk) continue;
+                if (keyResp.Type != RespType.BulkString) continue;
                 var key = (string)keyResp.Value!;
 
                 // Get meta
-                await writer.WriteAsync(stream, RespValue.Array(new[]
+                await writer.WriteAsync(RespValue.Array(new[]
                 {
-                    RespValue.Bulk("GETMETA"),
-                    RespValue.Bulk(key)
+                    RespValue.BulkString("GETMETA"),
+                    RespValue.BulkString(key)
                 }));
 
                 var metaResp = await reader.ReadAsync();
@@ -269,10 +269,6 @@ public partial class MainViewModel : ObservableObject
     }
 
 
-
-
-
-
     [RelayCommand]
     private async Task DeleteSelectedAsync()
     {
@@ -289,14 +285,14 @@ public partial class MainViewModel : ObservableObject
         {
             using var client = new TcpClient(Host, Port);
             using var stream = client.GetStream();
-            var writer = new RespWriter();
+            var writer = new RespWriter(stream);
             var reader = new RespReader(stream);
 
             // Send DEL key
-            await writer.WriteAsync(stream, RespValue.Array(new[]
+            await writer.WriteAsync(RespValue.Array(new[]
             {
-            RespValue.Bulk("DEL"),
-            RespValue.Bulk(SelectedEntry.Key)
+            RespValue.BulkString("DEL"),
+            RespValue.BulkString(SelectedEntry.Key)
         }));
 
             var response = await reader.ReadAsync();
@@ -340,16 +336,16 @@ public partial class MainViewModel : ObservableObject
         {
             using var client = new TcpClient(Host, Port);
             using var stream = client.GetStream();
-            var writer = new RespWriter();
+            var writer = new RespWriter(stream);
             var reader = new RespReader(stream);
 
             // Send SET key value
-            await writer.WriteAsync(stream, RespValue.Array(new[]
+            await writer.WriteAsync(RespValue.Array(new[]
             {
-            RespValue.Bulk("SET"),
-            RespValue.Bulk(key),
-            RespValue.Bulk(value)
-        }));
+                RespValue.BulkString("SET"),
+                RespValue.BulkString(key),
+                RespValue.BulkString(value)
+            }));
 
             var response = await reader.ReadAsync();
             if (response?.Type == RespType.SimpleString && (string)response.Value! == "OK")
@@ -387,13 +383,13 @@ public partial class MainViewModel : ObservableObject
         {
             using var client = new TcpClient(Host, Port);
             using var stream = client.GetStream();
-            var writer = new RespWriter();
+            var writer = new RespWriter(stream);
             var reader = new RespReader(stream);
 
             // Send DEL key
-            await writer.WriteAsync(stream, RespValue.Array(new[]
+            await writer.WriteAsync(RespValue.Array(new[]
             {
-                RespValue.Bulk("FLUSHDB")
+                RespValue.BulkString("FLUSHDB")
             }));
 
             var response = await reader.ReadAsync();

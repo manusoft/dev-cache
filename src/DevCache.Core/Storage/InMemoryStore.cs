@@ -405,18 +405,41 @@ public sealed partial class InMemoryStore : IDisposable
     }
 
     // ---------------- Hashes ----------------
-    public bool HSet(string key, string field, string value, bool persist = true)
+    public int HSet(string key, bool persist = true, params string[] fieldValuePairs)
     {
+        if (fieldValuePairs == null || fieldValuePairs.Length < 2 || fieldValuePairs.Length % 2 != 0)
+        {
+            throw new ArgumentException(
+                "HSet requires at least one field-value pair (even number of arguments after key)");
+        }
+
         var entry = GetOrCreateHashEntry(key);
-        _eviction.OnKeyInsert(key);
+        int newFields = 0;
 
-        bool added = !entry.Fields.ContainsKey(field);
-        entry.Fields[field] = value;
+        // Process field-value pairs
+        for (int i = 0; i < fieldValuePairs.Length; i += 2)
+        {
+            string field = fieldValuePairs[i];
+            string value = fieldValuePairs[i + 1];
 
+            bool wasNew = !entry.Fields.ContainsKey(field);
+            entry.Fields[field] = value;
+
+            if (wasNew)
+                newFields++;
+        }
+
+        // Persist the full command only once (if requested)
         if (persist)
-            _aof.AppendCommand("HSET", key, field, value);
+        {
+            // Build full command: HSET key field1 value1 field2 value2 ...
+            var cmdArgs = new List<string> { key };
+            cmdArgs.AddRange(fieldValuePairs);
 
-        return added;
+            _aof.AppendCommand("HSET", cmdArgs.ToArray());
+        }
+
+        return newFields;
     }
 
     public string? HGet(string key, string field)
@@ -491,7 +514,7 @@ public sealed partial class InMemoryStore : IDisposable
 
     // ---------------- UI Support ----------------
     public IEnumerable<string> Keys =>
-        _data.Where(x => !x.Value.ExpiryUtc.HasValue || x.Value.ExpiryUtc > DateTimeOffset.UtcNow)
+        _data.Where(x => x.Value.ExpiryUtc == null || x.Value.ExpiryUtc > DateTimeOffset.UtcNow)
              .Select(x => x.Key);
 
     public bool TryGetMeta(string key, out CacheMeta meta)

@@ -11,24 +11,29 @@ public static class CommandRegistry
     private static readonly Dictionary<string, RedisCommand> _commands;
     private static InMemoryStore? _store;
     private static ServerRuntimeInfo? _runtimeInfo;
+    private static string? _requirePass;
 
     public static InMemoryStore Store => _store
         ?? throw new InvalidOperationException("Store not initialized");
 
     public static bool TryGet(string name, out RedisCommand command)
         => _commands.TryGetValue(name, out command!);
+        
+    public static string? RequirePass => _requirePass;
 
     static CommandRegistry()
     {
         _commands = new(StringComparer.OrdinalIgnoreCase)
         {
             // Core
-            ["PING"] = PingAsync,
+            ["AUTH"] = AuthAsync,
+            ["CONFIG"] = ConfigAsync,
+            ["CLIENT"] = ClientAsync,           
             ["ECHO"] = EchoAsync,
             ["INFO"] = InfoAsync,
-            ["CONFIG"] = ConfigAsync,
-            ["ROLE"] = RoleAsync,
-            ["CLIENT"] = ClientAsync,
+            ["PING"] = PingAsync,
+            ["ROLE"] = RoleAsync,            
+            ["QUIT"] = QuitAsync,            
 
             // KV (Strings)
             ["SET"] = SetAsync,
@@ -38,6 +43,8 @@ public static class CommandRegistry
             ["INCR"] = IncrAsync,
             ["DECR"] = DecrAsync,
             ["INCRBY"] = IncrByAsync,
+            ["SCAN"] = ScanAsync,
+            ["GETRANGE"] = GetRangeAsync,
 
             // TTL
             ["EXPIRE"] = ExpireAsync,
@@ -68,68 +75,112 @@ public static class CommandRegistry
             ["HDEL"] = HDelAsync,
             ["HLEN"] = HLenAsync,
             ["HKEYS"] = HKeysAsync,
-            ["HVALS"] = HValsAsync,            
+            ["HVALS"] = HValsAsync,
+            ["HSCAN"] = HScanAsync,
+            ["HGETALL"] = HGetAllAsync,
 
         };
     }
 
-    public static void Initialize(InMemoryStore store, ServerRuntimeInfo runtimeInfo)
+    public static void Initialize(InMemoryStore store, ServerRuntimeInfo runtimeInfo, string? requirePass = null)
     {
         if (_store != null) throw new InvalidOperationException("Already initialized");
         _store = store;
         _runtimeInfo = runtimeInfo;
+
+        // Normalize: treat empty/whitespace as "no password"
+        _requirePass = string.IsNullOrWhiteSpace(requirePass) ? null : requirePass;       
     }
 
     // ---------------- Core ----------------
 
-    private static async Task PingAsync(CommandContext ctx, IReadOnlyList<string> args)
-    {
-        if (args.Count > 1)
-        {
-            await Error(ctx, "ERR wrong number of arguments for 'ping' command");
-            return;
-        }
-
-        string response = args.Count == 1 ? args[0] : "PONG";
-        await ctx.Writer.WriteAsync(RespValue.SimpleString(response));
-    }
-
-    private static async Task EchoAsync(CommandContext ctx, IReadOnlyList<string> args)
+    private static async Task AuthAsync(CommandContext ctx, IReadOnlyList<string> args)
     {
         if (args.Count != 1)
         {
-            await Error(ctx, "ERR wrong number of arguments for 'echo' command");
+            await ctx.Writer.WriteAsync(
+                RespValue.Error("ERR wrong number of arguments for 'auth' command"));
             return;
         }
 
-        await ctx.Writer.WriteAsync(RespValue.BulkString(args[0]));
-    }
+        string provided = args[0];
 
-    private static async Task InfoAsync(CommandContext ctx, IReadOnlyList<string> args)
-    {
-        string section;
-
-        switch (args.Count)
+        // If no password is required → always accept
+        if (RequirePass == null || string.IsNullOrEmpty(RequirePass))
         {
-            case 0:
-                section = "all";
-                break;
-
-            case 1:
-                section = args[0].ToLowerInvariant();
-                break;
-
-            default:
-                await ctx.Writer.WriteAsync(
-                    RespValue.Error("ERR wrong number of arguments for 'info' command")
-                );
-                return;
+            ctx.IsAuthenticated = true;
+            await ctx.Writer.WriteAsync(RespValue.SimpleString("OK"));
+            return;
         }
 
-        var handler = new InfoCommandHandler(CommandRegistry.Store, CommandRegistry._runtimeInfo!);
-        string result = handler.Execute(new[] { section });
+        // Real check (simple string comparison is fine for now)
+        if (provided == RequirePass)
+        {
+            ctx.IsAuthenticated = true;
+            await ctx.Writer.WriteAsync(RespValue.SimpleString("OK"));
+        }
+        else
+        {
+            ctx.IsAuthenticated = false;
+            await ctx.Writer.WriteAsync(
+                RespValue.Error("ERR invalid password"));
+        }
+    }
 
-        await ctx.Writer.WriteAsync(RespValue.BulkString(result));
+    private static async Task ClientAsync(CommandContext ctx, IReadOnlyList<string> args)
+    {
+        if (args.Count == 0)
+        {
+            await ctx.Writer.WriteAsync(
+                RespValue.Error("ERR wrong number of arguments for 'client' command")
+            );
+            return;
+        }
+
+        string subcmd = args[0].ToUpperInvariant();
+
+        if (subcmd == "LIST")
+        {
+            // Very basic fake output - pretend there is one active client
+            // Format matches real Redis client list line
+            var now = DateTimeOffset.UtcNow;
+            long ageSeconds = (long)(now - ctx.ConnectedAt).TotalSeconds;
+
+            string clientInfo =
+                $"id=1 " +
+                $"addr={ctx.Client.Client.RemoteEndPoint?.ToString() ?? "unknown:0"} " +
+                $"fd=8 " +                           // fake file descriptor
+                $"name= " +                          // client name (empty if not set)
+                $"age={ageSeconds} " +
+                $"idle=0 " +                         // idle time in seconds
+                $"flags=N " +                        // N = normal client
+                $"db=0 " +
+                $"sub=0 " +
+                $"psub=0 " +
+                $"qbuf=0 " +
+                $"qbuf-free=0 " +
+                $"obl=0 " +
+                $"oll=0 " +
+                $"omem=0 " +
+                $"events=r " +                       // r = readable
+                $"cmd=client " +                     // last command
+                $"user=default " +
+                $"redir=-1";
+
+            await ctx.Writer.WriteAsync(
+                RespValue.BulkString(clientInfo + "\n")
+            );
+        }
+        else if (subcmd == "GETNAME" || subcmd == "SETNAME")
+        {
+            await ctx.Writer.WriteAsync(RespValue.Error("ERR CLIENT GETNAME/SETNAME not supported yet"));
+        }
+        else
+        {
+            await ctx.Writer.WriteAsync(
+                RespValue.Error($"ERR Unsupported CLIENT subcommand or wrong number of arguments for 'CLIENT|client {subcmd}'")
+            );
+        }
     }
 
     private static async Task ConfigAsync(CommandContext ctx, IReadOnlyList<string> args)
@@ -205,6 +256,56 @@ public static class CommandRegistry
         }
     }
 
+    private static async Task EchoAsync(CommandContext ctx, IReadOnlyList<string> args)
+    {
+        if (args.Count != 1)
+        {
+            await Error(ctx, "ERR wrong number of arguments for 'echo' command");
+            return;
+        }
+
+        await ctx.Writer.WriteAsync(RespValue.BulkString(args[0]));
+    }
+
+    private static async Task InfoAsync(CommandContext ctx, IReadOnlyList<string> args)
+    {
+        string section;
+
+        switch (args.Count)
+        {
+            case 0:
+                section = "all";
+                break;
+
+            case 1:
+                section = args[0].ToLowerInvariant();
+                break;
+
+            default:
+                await ctx.Writer.WriteAsync(
+                    RespValue.Error("ERR wrong number of arguments for 'info' command")
+                );
+                return;
+        }
+
+        var handler = new InfoCommandHandler(CommandRegistry.Store, CommandRegistry._runtimeInfo!);
+        string result = handler.Execute(new[] { section });
+
+        await ctx.Writer.WriteAsync(RespValue.BulkString(result));
+    }
+
+    private static async Task PingAsync(CommandContext ctx, IReadOnlyList<string> args)
+    {
+        if (args.Count > 1)
+        {
+            await Error(ctx, "ERR wrong number of arguments for 'ping' command");
+            return;
+        }
+
+        string response = args.Count == 1 ? args[0] : "PONG";
+        await ctx.Writer.WriteAsync(RespValue.SimpleString(response));
+    }
+
     private static async Task RoleAsync(CommandContext ctx, IReadOnlyList<string> args)
     {
         if (args.Count != 0)
@@ -227,61 +328,17 @@ public static class CommandRegistry
 
         await ctx.Writer.WriteAsync(RespValue.Array(reply.AsReadOnly()));
     }
-
-    private static async Task ClientAsync(CommandContext ctx, IReadOnlyList<string> args)
+    
+    private static async Task QuitAsync(CommandContext ctx, IReadOnlyList<string> args)
     {
-        if (args.Count == 0)
+        if (args.Count > 0)
         {
-            await ctx.Writer.WriteAsync(
-                RespValue.Error("ERR wrong number of arguments for 'client' command")
-            );
+            await ctx.Writer.WriteAsync(RespValue.Error("ERR wrong number of arguments for 'quit' command"));
             return;
         }
 
-        string subcmd = args[0].ToUpperInvariant();
-
-        if (subcmd == "LIST")
-        {
-            // Very basic fake output - pretend there is one active client
-            // Format matches real Redis client list line
-            var now = DateTimeOffset.UtcNow;
-            long ageSeconds = (long)(now - ctx.ConnectedAt).TotalSeconds;
-
-            string clientInfo =
-                $"id=1 " +
-                $"addr={ctx.Client.Client.RemoteEndPoint?.ToString() ?? "unknown:0"} " +
-                $"fd=8 " +                           // fake file descriptor
-                $"name= " +                          // client name (empty if not set)
-                $"age={ageSeconds} " +
-                $"idle=0 " +                         // idle time in seconds
-                $"flags=N " +                        // N = normal client
-                $"db=0 " +
-                $"sub=0 " +
-                $"psub=0 " +
-                $"qbuf=0 " +
-                $"qbuf-free=0 " +
-                $"obl=0 " +
-                $"oll=0 " +
-                $"omem=0 " +
-                $"events=r " +                       // r = readable
-                $"cmd=client " +                     // last command
-                $"user=default " +
-                $"redir=-1";
-
-            await ctx.Writer.WriteAsync(
-                RespValue.BulkString(clientInfo + "\n")
-            );
-        }
-        else if (subcmd == "GETNAME" || subcmd == "SETNAME")
-        {
-            await ctx.Writer.WriteAsync(RespValue.Error("ERR CLIENT GETNAME/SETNAME not supported yet"));
-        }
-        else
-        {
-            await ctx.Writer.WriteAsync(
-                RespValue.Error($"ERR Unsupported CLIENT subcommand or wrong number of arguments for 'CLIENT|client {subcmd}'")
-            );
-        }
+        await ctx.Writer.WriteAsync(RespValue.SimpleString("OK"));
+        // The connection will close naturally after this reply because we break the loop on client side
     }
 
     // ---------------- KV (Strings) ----------------
@@ -462,6 +519,143 @@ public static class CommandRegistry
         long newValue = CommandRegistry.Store.Incr(key, increment);
 
         await ctx.Writer.WriteAsync(RespValue.Integer(newValue));
+    }
+
+    private static async Task ScanAsync(CommandContext ctx, IReadOnlyList<string> args)
+    {
+        if (args.Count < 1)
+        {
+            await Error(ctx, "ERR wrong number of arguments for 'scan' command");
+            return;
+        }
+
+        // Parse cursor (first arg) — must be non-negative integer
+        if (!ulong.TryParse(args[0], out ulong cursor))
+        {
+            await Error(ctx, "ERR invalid cursor");
+            return;
+        }
+
+        string? matchPattern = null;
+        int countHint = 10; // default ~10 keys per iteration
+
+        // Parse optional MATCH and COUNT
+        for (int i = 1; i < args.Count; i++)
+        {
+            string opt = args[i].ToUpperInvariant();
+            if (opt == "MATCH" && i + 1 < args.Count)
+            {
+                matchPattern = args[++i];
+            }
+            else if (opt == "COUNT" && i + 1 < args.Count)
+            {
+                if (!int.TryParse(args[++i], out int cnt) || cnt <= 0)
+                {
+                    await Error(ctx, "ERR invalid COUNT value");
+                    return;
+                }
+                countHint = cnt;
+            }
+            else
+            {
+                await Error(ctx, $"ERR unknown option '{opt}' or wrong number of arguments");
+                return;
+            }
+        }
+
+        // Get all non-expired keys (your existing Store.Keys)
+        var allKeys = CommandRegistry.Store.Keys.ToList(); // Materialize to list for indexing
+
+        // If cursor is at end (0), start from beginning
+        if (cursor == 0)
+        {
+            cursor = 0; // reset
+        }
+        else if (cursor >= (ulong)allKeys.Count)
+        {
+            // Invalid cursor: too large → return end immediately
+            await ReplyWithCursorAndKeys(ctx, 0, new List<RespValue>());
+            return;
+        }
+
+        // Calculate scan range (approximate countHint)
+        int startIndex = (int)cursor;
+        int endIndex = Math.Min(startIndex + countHint, allKeys.Count);
+
+        var scannedKeys = new List<RespValue>();
+        for (int j = startIndex; j < endIndex; j++)
+        {
+            string key = allKeys[j];
+            // Apply MATCH filter if specified
+            if (matchPattern == null || CommonHelper.MatchesPattern(key, matchPattern))
+            {
+                scannedKeys.Add(RespValue.BulkString(key));
+            }
+        }
+
+        // Next cursor: position after last scanned key (or 0 if end)
+        ulong nextCursor = (ulong)(endIndex < allKeys.Count ? endIndex : 0);
+
+        await ReplyWithCursorAndKeys(ctx, nextCursor, scannedKeys);
+    }
+
+    private static async Task GetRangeAsync(CommandContext ctx, IReadOnlyList<string> args)
+    {
+        if (args.Count != 3)
+        {
+            await Error(ctx, "ERR wrong number of arguments for 'getrange' command");
+            return;
+        }
+
+        string key = args[0];
+        string sStart = args[1];
+        string sEnd = args[2];
+
+        // Parse start & end
+        if (!long.TryParse(sStart, out long start) || !long.TryParse(sEnd, out long end))
+        {
+            await Error(ctx, "ERR value is not an integer or out of range");
+            return;
+        }
+
+        var entry = Store.GetEntry(key);
+        if (entry == null)
+        {
+            // non-existing key → empty string (Redis behavior)
+            await ctx.Writer.WriteAsync(RespValue.BulkString(""));
+            return;
+        }
+
+        if (entry is not StringEntry strEntry)
+        {
+            await Error(ctx, "WRONGTYPE Operation against a key holding the wrong kind of value");
+            return;
+        }
+
+        string value = strEntry.Value;
+        if (value.Length == 0)
+        {
+            await ctx.Writer.WriteAsync(RespValue.BulkString(""));
+            return;
+        }
+
+        // Handle negative offsets
+        if (start < 0) start = value.Length + start;
+        if (end < 0) end = value.Length + end;
+
+        // Clamp to valid range
+        start = Math.Max(0, start);
+        end = Math.Min(value.Length - 1, end);
+
+        if (start > end)
+        {
+            await ctx.Writer.WriteAsync(RespValue.BulkString(""));
+            return;
+        }
+
+        string result = value.Substring((int)start, (int)(end - start + 1));
+
+        await ctx.Writer.WriteAsync(RespValue.BulkString(result));
     }
 
     // ---------------- TTL ----------------
@@ -759,15 +953,13 @@ public static class CommandRegistry
     // ---------------- Hashes ----------------
     private static async Task HSetAsync(CommandContext ctx, IReadOnlyList<string> args)
     {
-        if (args.Count != 3)
+        if (args.Count < 3 || (args.Count - 1) % 2 != 0)
         {
             await Error(ctx, "ERR wrong number of arguments for 'hset' command");
             return;
         }
 
         string key = args[0];
-        string field = args[1];
-        string value = args[2];
 
         var entry = Store.GetEntry(key);
         if (entry != null && entry is not HashEntry)
@@ -776,8 +968,11 @@ public static class CommandRegistry
             return;
         }
 
-        bool added = Store.HSet(key, field, value, persist: true);
-        await ctx.Writer.WriteAsync(RespValue.Integer(added ? 1 : 0));
+        // Pass key + all remaining args as field-value pairs
+        // Skip(1) removes the key itself
+        int newCount = Store.HSet(key, persist: true, args.Skip(1).ToArray());
+
+        await ctx.Writer.WriteAsync(RespValue.Integer(newCount));
     }
 
     private static async Task HGetAsync(CommandContext ctx, IReadOnlyList<string> args)
@@ -828,6 +1023,99 @@ public static class CommandRegistry
         await ctx.Writer.WriteAsync(RespValue.Array(keys));
     }
 
+    private static async Task HScanAsync(CommandContext ctx, IReadOnlyList<string> args)
+    {
+        if (args.Count < 2)
+        {
+            await Error(ctx, "ERR wrong number of arguments for 'hscan' command");
+            return;
+        }
+
+        string key = args[0];
+
+        // Parse cursor (must be non-negative integer)
+        if (!ulong.TryParse(args[1], out ulong cursor))
+        {
+            await Error(ctx, "ERR invalid cursor");
+            return;
+        }
+
+        string? matchPattern = null;
+        int countHint = 10; // default ~10 fields per iteration
+
+        // Parse optional MATCH and COUNT
+        for (int i = 2; i < args.Count; i += 2)
+        {
+            string opt = args[i].ToUpperInvariant();
+
+            if (opt == "MATCH" && i + 1 < args.Count)
+            {
+                matchPattern = args[i + 1];
+                i++; // skip value
+            }
+            else if (opt == "COUNT" && i + 1 < args.Count)
+            {
+                if (!int.TryParse(args[i + 1], out int cnt) || cnt <= 0)
+                {
+                    await Error(ctx, "ERR invalid COUNT value");
+                    return;
+                }
+                countHint = cnt;
+            }
+            else
+            {
+                await Error(ctx, $"ERR syntax error near '{opt}'");
+                return;
+            }
+        }
+
+        // Get the hash entry
+        var entry = Store.GetEntry(key);
+        if (entry == null || entry is not HashEntry hashEntry)
+        {
+            // Key not found or wrong type → cursor 0 + empty array
+            await ReplyWithCursorAndFields(ctx, 0, new List<RespValue>());
+            return;
+        }
+
+        var allFields = hashEntry.Fields.ToList(); // field → value pairs
+
+        if (allFields.Count == 0)
+        {
+            await ReplyWithCursorAndFields(ctx, 0, new List<RespValue>());
+            return;
+        }
+
+        // Cursor logic (same as SCAN)
+        int startIndex = (int)cursor;
+        if (startIndex >= allFields.Count)
+        {
+            await ReplyWithCursorAndFields(ctx, 0, new List<RespValue>());
+            return;
+        }
+
+        int endIndex = Math.Min(startIndex + countHint, allFields.Count);
+
+        var resultFields = new List<RespValue>();
+
+        for (int j = startIndex; j < endIndex; j++)
+        {
+            var kv = allFields[j];
+            string field = kv.Key;
+
+            // Apply MATCH filter on field name
+            if (matchPattern == null || CommonHelper.MatchesPattern(field, matchPattern))
+            {
+                resultFields.Add(RespValue.BulkString(field));
+                resultFields.Add(RespValue.BulkString(kv.Value));
+            }
+        }
+
+        ulong nextCursor = (ulong)(endIndex < allFields.Count ? endIndex : 0);
+
+        await ReplyWithCursorAndFields(ctx, nextCursor, resultFields);
+    }
+
     private static async Task HValsAsync(CommandContext ctx, IReadOnlyList<string> args)
     {
         if (args.Count != 1)
@@ -840,13 +1128,72 @@ public static class CommandRegistry
         await ctx.Writer.WriteAsync(RespValue.Array(vals));
     }
 
+    private static async Task HGetAllAsync(CommandContext ctx, IReadOnlyList<string> args)
+    {
+        if (args.Count != 1)
+        {
+            await Error(ctx, "ERR wrong number of arguments for 'hgetall' command");
+            return;
+        }
+
+        string key = args[0];
+
+        var entry = Store.GetEntry(key);
+        if (entry == null)
+        {
+            // Key not found → empty array
+            await ctx.Writer.WriteAsync(RespValue.Array(Array.Empty<RespValue>().AsReadOnly()));
+            return;
+        }
+
+        if (entry is not HashEntry hashEntry)
+        {
+            await Error(ctx, "WRONGTYPE Operation against a key holding the wrong kind of value");
+            return;
+        }
+
+        var allFields = new List<RespValue>();
+
+        // Add each field and its value (flat list)
+        foreach (var kv in hashEntry.Fields)
+        {
+            allFields.Add(RespValue.BulkString(kv.Key));
+            allFields.Add(RespValue.BulkString(kv.Value));
+        }
+
+        await ctx.Writer.WriteAsync(RespValue.Array(allFields.AsReadOnly()));
+    }
+
 
     // ---------------- Helpers ----------------
+
     private static Task Ok(CommandContext ctx)
         => ctx.Writer.WriteAsync(RespValue.SimpleString("OK"));
 
     private static Task Error(CommandContext ctx, string message)
         => ctx.Writer.WriteAsync(RespValue.Error(message));
+
+    private static async Task ReplyWithCursorAndKeys(CommandContext ctx, ulong cursor, List<RespValue> keys)
+    {
+        var reply = new List<RespValue>
+        {
+            RespValue.BulkString(cursor.ToString()), // Cursor as bulk string
+            RespValue.Array(keys.AsReadOnly())
+        }.AsReadOnly();
+
+        await ctx.Writer.WriteAsync(RespValue.Array(reply));
+    }
+
+    private static async Task ReplyWithCursorAndFields(CommandContext ctx, ulong cursor, List<RespValue> fields)
+    {
+        var reply = new List<RespValue>
+    {
+        RespValue.BulkString(cursor.ToString()),
+        RespValue.Array(fields.AsReadOnly())
+    };
+
+        await ctx.Writer.WriteAsync(RespValue.Array(reply.AsReadOnly()));
+    }
 
     private static string? GetConfigValue(string key)
     {

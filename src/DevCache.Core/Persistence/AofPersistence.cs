@@ -200,8 +200,17 @@ public sealed class AofPersistence : IDisposable
                         loaded++;
                         break;
 
-                    case "HSET" when commandArgs.Count == 4:
-                        _store.HSet(commandArgs[1], commandArgs[2], commandArgs[3], persist: false);
+                    case "HSET" when commandArgs.Count >= 4 && (commandArgs.Count - 1) % 2 == 0:
+                        string key = commandArgs[1];
+
+                        for (int j = 2; j < commandArgs.Count; j += 2)
+                        {
+                            string field = commandArgs[j];
+                            string value = commandArgs[j + 1];
+
+                            _store.HSet(key, persist: false, field, value);
+                        }
+
                         loaded++;
                         break;
 

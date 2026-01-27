@@ -15,7 +15,7 @@ public sealed partial class MainWindow : Window
     {
         InitializeComponent();
         var mainPage = new MainPage();
-        Content = mainPage;
+        this.MainFrame.Content = mainPage;
         CreateAppWindow();
     }
 
@@ -25,7 +25,7 @@ public sealed partial class MainWindow : Window
         AppWindow.Title = "DevCache Explorer";
 
         // Set the window size (including borders)
-        AppWindow.Resize(new SizeInt32(1200, 800));
+        AppWindow.Resize(new SizeInt32(1300, 850));
 
         // Set the taskbar icon (displayed in the taskbar)
         AppWindow.SetIcon("Assets/appicon.ico");

@@ -435,6 +435,7 @@ internal class Program
         Console.WriteLine($"{subIndent}LPOP key                    Pop value from head");
         Console.WriteLine($"{subIndent}RPOP key                    Pop value from tail");
         Console.WriteLine($"{subIndent}LLEN key                    Get list length");
+        Console.WriteLine($"{subIndent}LRANGE key start stop       Get range of list items");
 
         Console.WriteLine();
 
@@ -502,18 +503,24 @@ internal class Program
         return result;
     }
 
-    private static void PrintResponse(RespValue? resp)
+    private static void PrintResponse(RespValue? resp, int indentLevel = 0)
     {
+        string indent = new string(' ', indentLevel * 3);
+
         if (resp is null)
         {
+            Console.ForegroundColor = ConsoleColor.White;
             Console.WriteLine("(nil)");
+            Console.ResetColor();
             return;
         }
 
         switch (resp.Type)
         {
             case RespType.SimpleString:
-                Console.WriteLine(resp.Value);
+                Console.ForegroundColor = ConsoleColor.White;
+                Console.WriteLine(resp.Value is null ? $"\"\"" : $"\"{resp.Value}\"");
+                Console.ResetColor();
                 break;
 
             case RespType.Error:
@@ -528,36 +535,76 @@ internal class Program
                 break;
 
             case RespType.Integer:
-                Console.ForegroundColor = ConsoleColor.Green;
+                Console.ForegroundColor = ConsoleColor.White;
                 Console.WriteLine($"(integer) {resp.Value}");
                 Console.ResetColor();
                 break;
 
             case RespType.BulkString:
-                Console.WriteLine(resp.Value ?? "(nil)");
+                Console.ForegroundColor = ConsoleColor.White;
+                Console.WriteLine(resp.Value is null ? "(nil)" : $"\"{resp.Value}\"");
+                Console.ResetColor();
                 break;
 
             case RespType.Array:
                 var items = (IReadOnlyList<RespValue>)resp.Value!;
-                if (items.Count == 0)
+
+                // Special handling for SCAN replies (cursor + array of keys)
+                if (items.Count == 2 && items[0].Type == RespType.BulkString && items[1].Type == RespType.Array)
                 {
+                    string cursor = items[0].AsString() ?? "0";
+                    var keys = items[1].AsArray() ?? Array.Empty<RespValue>();
+
+                    Console.ForegroundColor = ConsoleColor.White;
+                    Console.WriteLine($"  1. \"{cursor}\"");
+
+                    if (keys.Count == 0)
+                    {
+                        Console.WriteLine("  2. (empty array)");
+                        Console.ResetColor();
+                    }
+                    else
+                    {
+                        Console.WriteLine($"  2.");
+
+                        for (int i = 0; i < keys.Count; i++)
+                        {
+                            string keyStr = keys[i].AsString() ?? "(nil)";
+                            Console.ForegroundColor = ConsoleColor.Yellow;
+                            Console.WriteLine($"     {i + 1}) \"{keyStr}\"");
+                            Console.ResetColor();
+                        }
+                    }
+                }
+                // Normal array (non-SCAN)
+                else if (items.Count == 0)
+                {
+                    Console.ForegroundColor = ConsoleColor.White;
                     Console.WriteLine("(empty list or set)");
+                    Console.ResetColor();
                 }
                 else
                 {
                     for (int i = 0; i < items.Count; i++)
                     {
+                        Console.ForegroundColor = ConsoleColor.White;
                         Console.WriteLine($"  {i + 1}) {RespValueToString(items[i])}");
+                        Console.ResetColor();
                     }
                 }
                 break;
 
             case RespType.NullBulk:
+            case RespType.NullArray:
+                Console.ForegroundColor = ConsoleColor.White;
                 Console.WriteLine("(nil)");
+                Console.ResetColor();
                 break;
 
             default:
+                Console.ForegroundColor = ConsoleColor.Yellow;
                 Console.WriteLine($"[unsupported: {resp.Type}]");
+                Console.ResetColor();
                 break;
         }
     }
@@ -588,90 +635,4 @@ internal class Program
             return false;
         }
     }
-
-    //private static async Task RunInteractiveRepl(string host, int port, CancellationToken ct)
-    //{
-    //    Console.ForegroundColor = ConsoleColor.DarkYellow;
-    //    Console.WriteLine($"DevCache CLI v1.0.0"); // "DevCache CLI v1.0.0 – connected to {host}:{port}"
-    //    Console.WriteLine("Copyright © Manuhub. All rights reserved.");
-    //    Console.WriteLine();
-    //    Console.ResetColor();
-
-    //    // Optional: seed some helpful commands into history on startup
-    //    ReadLine.AddHistory("HELP");
-    //    ReadLine.AddHistory("KEYS *");
-    //    ReadLine.AddHistory("PING");
-
-    //    // ── Enable auto-completion ──
-    //    ReadLine.AutoCompletionHandler = new DevCacheAutoCompleteHandler();
-
-    //    while (!ct.IsCancellationRequested)
-    //    {
-    //        Console.ForegroundColor = ConsoleColor.DarkCyan;
-    //        var line = ReadLine.Read($"{host}:{port}> ").Trim();
-    //        Console.ResetColor();
-
-    //        if (string.IsNullOrWhiteSpace(line)) continue;
-
-    //        if (line is "exit" or "quit")
-    //            break;
-
-    //        if (line is "help" or "--help" or "-h")
-    //        {
-    //            PrintHelp();
-    //            continue;
-    //        }
-
-    //        if (line == "clearhistory")
-    //        {
-    //            ReadLine.ClearHistory();
-    //            Console.WriteLine("History cleared.");
-    //            continue;
-    //        }
-
-    //        var parts = SplitCommandLine(line);
-    //        if (parts.Count == 0) continue;
-
-    //        try
-    //        {
-    //            await ExecuteCommand(host, port, parts, ct);
-
-    //            if (!string.IsNullOrWhiteSpace(line))
-    //            {
-    //                ReadLine.AddHistory(line);
-    //            }
-    //        }
-    //        catch (Exception ex)
-    //        {
-    //            Console.Error.WriteLine($"Error: {ex.Message}");
-    //        }           
-    //    }
-
-    //    Console.WriteLine("Goodbye.");
-
-    //    // Optional: clean up (not strictly needed)
-    //    ReadLine.AutoCompletionHandler = null;
-    //}
-
-    //private static async Task ExecuteCommand(string host, int port, IEnumerable<string> parts, CancellationToken ct)
-    //{
-    //    using var client = new TcpClient();
-    //    await client.ConnectAsync(host, port, ct);
-    //    await using var stream = client.GetStream();
-
-    //    var writer = new RespWriter(stream);
-    //    var reader = new RespReader(stream);
-
-    //    var cmdList = parts.ToList();
-    //    string cmdName = cmdList[0].ToUpperInvariant();
-    //    var args = cmdList.Skip(1).ToList();
-
-    //    var respItems = new List<RespValue> { RespValue.BulkString(cmdName) };
-    //    respItems.AddRange(args.Select(RespValue.BulkString));
-
-    //    await writer.WriteAsync(RespValue.Array(respItems.AsReadOnly()), ct);
-
-    //    var response = await reader.ReadAsync(ct);
-    //    PrintResponse(response);
-    //}
 }
