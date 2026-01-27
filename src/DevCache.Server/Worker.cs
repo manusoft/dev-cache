@@ -4,7 +4,7 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration) : Back
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var server = new Server(configuration, logger);
+        var server = new DevCacheServer(configuration, logger);
 
         try
         {

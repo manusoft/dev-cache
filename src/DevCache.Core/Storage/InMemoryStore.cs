@@ -1,8 +1,8 @@
-﻿using DevCache.Core.Models;
+﻿using DevCache.Core.Eviction;
+using DevCache.Core.Models;
 using DevCache.Core.Persistence;
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Formats.Tar;
 using System.Globalization;
 
 namespace DevCache.Core.Storage;
@@ -12,6 +12,9 @@ public sealed partial class InMemoryStore : IDisposable
     // Core Storage
     private readonly ConcurrentDictionary<string, ValueEntry> _data =
         new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly IEvictionPolicy _eviction;
+    private readonly long _maxMemory;
 
     // Statistics
     private long _totalCommandsProcessed;
@@ -36,7 +39,7 @@ public sealed partial class InMemoryStore : IDisposable
 
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _expiryTask;
-    
+
     public InMemoryStore()
     {
         string aofPath = Path.Combine(
@@ -46,6 +49,10 @@ public sealed partial class InMemoryStore : IDisposable
         );
 
         Directory.CreateDirectory(Path.GetDirectoryName(aofPath)!);
+
+        _maxMemory = 0; // overridden by runtime if needed
+
+        _eviction = _maxMemory == 0 ? new NoEvictionPolicy() : new LruEvictionPolicy();
 
         _aof = new AofPersistence(this, aofPath);
         _aof.Load();
@@ -57,6 +64,32 @@ public sealed partial class InMemoryStore : IDisposable
     internal IEnumerable<KeyValuePair<string, ValueEntry>> GetAllEntries() => _data;
 
     internal ValueEntry? GetEntryInternal(string key) => _data.TryGetValue(key, out var entry) ? entry : null;
+
+
+    private void EnsureMemoryAvailable(long incomingBytes)
+    {
+        if (_maxMemory <= 0) return;
+
+        while (GetApproximateMemoryBytesUsed() + incomingBytes > _maxMemory)
+        {
+            var victim = _eviction.SelectEvictionCandidate();
+            if (victim == null) break;
+
+            if (_data.TryRemove(victim, out var entry))
+            {
+                _eviction.OnKeyRemove(victim);
+                IncrementEvictedKeys();
+
+                if (entry?.ExpiryUtc.HasValue == true)
+                    OnExpiryRemoved();
+            }
+            else
+            {
+                break;
+            }
+        }
+    }
+
 
     // ---------------- Background Tasks ----------------
     private async Task ExpiryLoop()
@@ -88,7 +121,7 @@ public sealed partial class InMemoryStore : IDisposable
     // ---------------- Statistics ----------------
     public void IncrementHit() => Interlocked.Increment(ref _keyspaceHits);
     public void IncrementMiss() => Interlocked.Increment(ref _keyspaceMisses);
-    public void IncrementCommandsProcessed() 
+    public void IncrementCommandsProcessed()
     {
         Interlocked.Increment(ref _totalCommandsProcessed);
 
@@ -156,8 +189,13 @@ public sealed partial class InMemoryStore : IDisposable
     // ---------------- Commands ----------------
     public bool Set(string key, string value, bool persist = true)
     {
+        long estimate = value.Length * 2L + 64;
+        EnsureMemoryAvailable(estimate);
+
         var entry = new StringEntry { Value = value };
         _data[key] = entry;
+
+        _eviction.OnKeyInsert(key);
 
         if (persist)
             _aof.AppendCommand("SET", key, value);
@@ -170,6 +208,7 @@ public sealed partial class InMemoryStore : IDisposable
         var entry = GetEntry(key);
         if (entry is StringEntry strEntry)
         {
+            _eviction.OnKeyAccess(key);
             IncrementHit();
             return strEntry.Value;
         }
@@ -182,6 +221,9 @@ public sealed partial class InMemoryStore : IDisposable
         var removed = _data.TryRemove(key, out var entry);
         if (removed && entry?.ExpiryUtc.HasValue == true)
             OnExpiryRemoved();
+
+        if (removed)
+            _eviction.OnKeyRemove(key);
 
         if (removed && persist)
             _aof.AppendCommand("DEL", key);
@@ -289,6 +331,8 @@ public sealed partial class InMemoryStore : IDisposable
     public int LPush(string key, string[] values, bool persist = true)
     {
         var entry = GetOrCreateListEntry(key);
+        _eviction.OnKeyInsert(key);
+
         int added = 0;
         for (int i = values.Length - 1; i >= 0; i--) // Reverse to push left
         {
@@ -305,6 +349,8 @@ public sealed partial class InMemoryStore : IDisposable
     public int RPush(string key, string[] values, bool persist = true)
     {
         var entry = GetOrCreateListEntry(key);
+        _eviction.OnKeyInsert(key);
+
         int added = 0;
         foreach (var val in values)
         {
@@ -362,6 +408,8 @@ public sealed partial class InMemoryStore : IDisposable
     public bool HSet(string key, string field, string value, bool persist = true)
     {
         var entry = GetOrCreateHashEntry(key);
+        _eviction.OnKeyInsert(key);
+
         bool added = !entry.Fields.ContainsKey(field);
         entry.Fields[field] = value;
 
@@ -422,6 +470,7 @@ public sealed partial class InMemoryStore : IDisposable
         if (entry.ExpiryUtc.HasValue && entry.ExpiryUtc <= DateTimeOffset.UtcNow)
         {
             _data.TryRemove(key, out _);
+            _eviction.OnKeyRemove(key);
             OnExpiryRemoved();
             IncrementExpiredKeys();
             return null;

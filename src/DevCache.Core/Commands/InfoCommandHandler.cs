@@ -59,13 +59,18 @@ public class InfoCommandHandler
         sb.AppendLine("# Memory");
         sb.AppendLine($"used_memory:{used}");
         sb.AppendLine($"used_memory_human:{FormatBytes(used)}");
-        sb.AppendLine("used_memory_peak:0");               // add peak tracking later
-        sb.AppendLine("used_memory_peak_human:0B");
+        sb.AppendLine($"used_memory_peak:{used}"); // simple peak for now
+        sb.AppendLine($"used_memory_peak_human:{FormatBytes(used)}");
+
         sb.AppendLine($"maxmemory:{max}");
         sb.AppendLine($"maxmemory_human:{FormatBytes(max)}");
-        sb.AppendLine("maxmemory_policy:noeviction");      // hardcoded for now
+        sb.AppendLine($"maxmemory_policy:{_runtime.MaxMemoryPolicy}");
+
         sb.AppendLine("mem_fragmentation_ratio:1.00");     // placeholder
         sb.AppendLine("mem_allocator:system");             // can detect later
+
+        sb.AppendLine($"evicted_keys:{_store.EvictedKeys}");
+
         sb.AppendLine();
     }
 
