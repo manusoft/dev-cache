@@ -191,6 +191,33 @@ public sealed class AofPersistence : IDisposable
                         loaded++;
                         break;
 
+                    case "LPUSHX" when commandArgs.Count >= 3:
+                        string keyL = commandArgs[1];
+                        var valuesL = commandArgs.Skip(2).ToArray();
+
+                        var entryL = _store.GetEntry(keyL);
+                        if (entryL != null && entryL is ListEntry listL)
+                        {
+                            for (int j = valuesL.Length - 1; j >= 0; j--)
+                            {
+                                listL.Values.Insert(0, valuesL[j]);
+                            }
+                        }
+                        loaded++;
+                        break;
+
+                    case "RPUSHX" when commandArgs.Count >= 3:
+                        string keyR = commandArgs[1];
+                        var valuesR = commandArgs.Skip(2).ToArray();
+
+                        var entryR = _store.GetEntry(keyR);
+                        if (entryR != null && entryR is ListEntry listR)
+                        {
+                            listR.Values.AddRange(valuesR);
+                        }
+                        loaded++;
+                        break;
+
                     case "LPOP" when commandArgs.Count == 2:
                         _store.LPop(commandArgs[1], persist: false);
                         loaded++;

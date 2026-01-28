@@ -364,6 +364,46 @@ public sealed partial class InMemoryStore : IDisposable
         return added;
     }
 
+    public int LPushX(string key, string[] values, bool persist = true)
+    {
+        var entry = GetEntry(key);
+        if (entry == null || entry is not ListEntry listEntry)
+        {
+            return 0;  // doesn't exist or wrong type → 0
+        }
+
+        int added = 0;
+        for (int i = values.Length - 1; i >= 0; i--)
+        {
+            listEntry.Values.Insert(0, values[i]);
+            added++;
+        }
+
+        if (persist && added > 0)
+            _aof.AppendCommand("LPUSHX", [key, .. values]);
+
+        return listEntry.Values.Count;
+    }
+
+    public int RPushX(string key, string[] values, bool persist = true)
+    {
+        var entry = GetEntry(key);
+        if (entry == null || entry is not ListEntry listEntry)
+        {
+            return 0;
+        }
+
+        foreach (var val in values)
+        {
+            listEntry.Values.Add(val);
+        }
+
+        if (persist && values.Length > 0)
+            _aof.AppendCommand("RPUSHX", [key, .. values]);
+
+        return listEntry.Values.Count;
+    }
+
     public string? LPop(string key, bool persist = true)
     {
         var entry = GetEntry(key) as ListEntry;

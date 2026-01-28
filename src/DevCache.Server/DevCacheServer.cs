@@ -120,15 +120,30 @@ public sealed class DevCacheServer : IDisposable
 
                 for (int i = 1; i < items.Count; i++)
                 {
-                    var arg = items[i];
-                    if (arg.Type == RespType.BulkString || arg.Type == RespType.SimpleString)
+                    var item = items[i];
+                    string? val = null;
+
+                    switch (item.Type)
                     {
-                        args.Add(arg.Value as string ?? string.Empty);
+                        case RespType.BulkString:
+                        case RespType.SimpleString:
+                            val = item.AsString();  // this should return "" for $0
+                            break;
+
+                        case RespType.Integer:
+                            val = item.AsInteger()?.ToString();
+                            break;
+
+                        case RespType.NullBulk:
+                            val = "";  // explicitly handle null bulk as empty string
+                            break;
+
+                        default:
+                            val = "";  // fallback for safety
+                            break;
                     }
-                    else
-                    {
-                        args.Add(string.Empty); // fallback – or you can reject
-                    }
+
+                    args.Add(val ?? "");                  
                 }
 
                 if (!CommandRegistry.TryGet(commandName, out var commandHandler))

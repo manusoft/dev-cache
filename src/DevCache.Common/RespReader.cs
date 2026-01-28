@@ -55,13 +55,40 @@ public sealed class RespReader
         if (length == -1)
             return RespValue.NullBulk;
 
-        byte[] data = new byte[length];
-        await ReadExactAsync(data, ct);
-        await ReadCrLfAsync(ct); // consume trailing \r\n
+        byte[] data;
+        if (length == 0)
+        {
+            data = Array.Empty<byte>();
+        }
+        else
+        {
+            data = new byte[length];
+            await ReadExactAsync(data, ct);
+        }
+
+        // Always consume the trailing \r\n, even for length 0
+        await ReadCrLfAsync(ct);
 
         string content = Encoding.UTF8.GetString(data);
         return RespValue.BulkString(content);
     }
+
+    //private async Task<RespValue> ReadBulkStringAsync(CancellationToken ct)
+    //{
+    //    string lenLine = await ReadLineAsync(ct);
+    //    if (!int.TryParse(lenLine, out int length))
+    //        throw new InvalidOperationException($"Invalid bulk length: {lenLine}");
+
+    //    if (length == -1)
+    //        return RespValue.NullBulk;
+
+    //    byte[] data = new byte[length];
+    //    await ReadExactAsync(data, ct);
+    //    await ReadCrLfAsync(ct); // consume trailing \r\n
+
+    //    string content = Encoding.UTF8.GetString(data);
+    //    return RespValue.BulkString(content);
+    //}
 
     private async Task<RespValue> ReadArrayAsync(CancellationToken ct)
     {
@@ -91,15 +118,21 @@ public sealed class RespReader
     // ────────────────────────────────────────────────
     private async Task<string> ReadLineAsync(CancellationToken ct)
     {
-        var sb = new StringBuilder(64);
+        var sb = new StringBuilder(128); // increased initial capacity
+
+        int bytesRead = 0;
+        const int maxLineLength = 4096; // safety limit
 
         while (true)
         {
             int b = await ReadByteAsync(ct);
+            bytesRead++;
+
+            if (bytesRead > maxLineLength)
+                throw new IOException("Line too long - possible protocol error");
 
             if (b == '\r')
             {
-                // Expect \n
                 int next = await ReadByteAsync(ct);
                 if (next != '\n')
                     throw new IOException("Expected \\n after \\r");
@@ -111,6 +144,29 @@ public sealed class RespReader
 
         return sb.ToString();
     }
+
+    //private async Task<string> ReadLineAsync(CancellationToken ct)
+    //{
+    //    var sb = new StringBuilder(64);
+
+    //    while (true)
+    //    {
+    //        int b = await ReadByteAsync(ct);
+
+    //        if (b == '\r')
+    //        {
+    //            // Expect \n
+    //            int next = await ReadByteAsync(ct);
+    //            if (next != '\n')
+    //                throw new IOException("Expected \\n after \\r");
+    //            break;
+    //        }
+
+    //        sb.Append((char)b);
+    //    }
+
+    //    return sb.ToString();
+    //}
 
     private async Task ReadExactAsync(byte[] buffer, CancellationToken ct)
     {

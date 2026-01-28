@@ -47,6 +47,7 @@ public static class CommandRegistry
             ["INCRBY"] = IncrByAsync,
             ["SCAN"] = ScanAsync,
             ["GETRANGE"] = GetRangeAsync,
+            ["STRLEN"] = StrLenAsync,
 
             // TTL
             ["EXPIRE"] = ExpireAsync,
@@ -68,6 +69,8 @@ public static class CommandRegistry
             ["RPUSH"] = RPushAsync,
             ["LPOP"] = LPopAsync,
             ["RPOP"] = RPopAsync,
+            ["LPUSHX"] = LPushXAsync,
+            ["RPUSHX"] = RPushXAsync,
             ["LLEN"] = LLenAsync,
             ["LRANGE"] = LRangeAsync,
 
@@ -368,6 +371,7 @@ public static class CommandRegistry
     // ---------------- KV (Strings) ----------------
     private static async Task SetAsync(CommandContext ctx, IReadOnlyList<string> args)
     {
+        // Require key + value (value can be empty)
         if (args.Count < 2)
         {
             await Error(ctx, "ERR wrong number of arguments for 'set' command");
@@ -375,49 +379,58 @@ public static class CommandRegistry
         }
 
         string key = args[0];
-        string value = args[1];
+        string value = args[1];  // value can be ""
 
         bool? nx = null;
-
         long? expireMs = null;
 
-        for (int i = 2; i < args.Count; i++)
+        // Start option parsing AFTER value (index 2+)
+        int i = 2;
+
+        while (i < args.Count)
         {
             string opt = args[i].ToUpperInvariant();
 
-            switch (opt)
+            if (string.IsNullOrEmpty(opt))
             {
-                case "EX":
-                    if (i + 1 >= args.Count || !int.TryParse(args[i + 1], out int sec) || sec <= 0)
-                    {
-                        await Error(ctx, "ERR value is not an integer or out of range");
-                        return;
-                    }
-                    expireMs = sec * 1000L;
-                    i++;
-                    break;
+                i++;
+                continue;  // ignore empty args from CLI
+            }
 
-                case "PX":
-                    if (i + 1 >= args.Count || !long.TryParse(args[i + 1], out long ms) || ms <= 0)
-                    {
-                        await Error(ctx, "ERR value is not an integer or out of range");
-                        return;
-                    }
-                    expireMs = ms;
-                    i++;
-                    break;
-
-                case "NX":
-                    nx = true;
-                    break;
-
-                case "XX":
-                    nx = false;
-                    break;
-
-                default:
-                    await Error(ctx, $"ERR syntax error near '{opt}'");
+            if (opt == "EX")
+            {
+                if (i + 1 >= args.Count || !int.TryParse(args[i + 1], out int sec) || sec <= 0)
+                {
+                    await Error(ctx, "ERR value is not an integer or out of range");
                     return;
+                }
+                expireMs = sec * 1000L;
+                i += 2;
+            }
+            else if (opt == "PX")
+            {
+                if (i + 1 >= args.Count || !long.TryParse(args[i + 1], out long ms) || ms <= 0)
+                {
+                    await Error(ctx, "ERR value is not an integer or out of range");
+                    return;
+                }
+                expireMs = ms;
+                i += 2;
+            }
+            else if (opt == "NX")
+            {
+                nx = true;
+                i++;
+            }
+            else if (opt == "XX")
+            {
+                nx = false;
+                i++;
+            }
+            else
+            {
+                await Error(ctx, $"ERR syntax error near '{opt}'");
+                return;
             }
         }
 
@@ -435,10 +448,8 @@ public static class CommandRegistry
             return;
         }
 
-        // Set the value (overwrites any type with string)
         Store.Set(key, value, persist: true);
 
-        // Apply expiry AFTER set
         if (expireMs.HasValue)
         {
             Store.Expire(key, expireMs.Value, persist: true);
@@ -682,6 +693,35 @@ public static class CommandRegistry
         await ctx.Writer.WriteAsync(RespValue.BulkString(result));
     }
 
+    private static async Task StrLenAsync(CommandContext ctx, IReadOnlyList<string> args)
+    {
+        if (args.Count != 1)
+        {
+            await Error(ctx, "ERR wrong number of arguments for 'strlen' command");
+            return;
+        }
+
+        string key = args[0];
+
+        var entry = Store.GetEntry(key);
+        if (entry == null)
+        {
+            // Key not found → length 0
+            await ctx.Writer.WriteAsync(RespValue.Integer(0));
+            return;
+        }
+
+        if (entry is not StringEntry strEntry)
+        {
+            await Error(ctx, "WRONGTYPE Operation against a key holding the wrong kind of value");
+            return;
+        }
+
+        int length = strEntry.Value.Length;
+
+        await ctx.Writer.WriteAsync(RespValue.Integer(length));
+    }
+
     // ---------------- TTL ----------------
     private static async Task ExpireAsync(CommandContext ctx, IReadOnlyList<string> args)
     {
@@ -876,6 +916,38 @@ public static class CommandRegistry
 
         int added = Store.RPush(key, values, persist: true);
         await ctx.Writer.WriteAsync(RespValue.Integer(added));
+    }
+
+    private static async Task LPushXAsync(CommandContext ctx, IReadOnlyList<string> args)
+    {
+        if (args.Count < 2)
+        {
+            await Error(ctx, "ERR wrong number of arguments for 'lpushx' command");
+            return;
+        }
+
+        string key = args[0];
+        var values = args.Skip(1).ToArray();
+
+        int newLength = Store.LPushX(key, values, persist: true);
+
+        await ctx.Writer.WriteAsync(RespValue.Integer(newLength));
+    }
+
+    private static async Task RPushXAsync(CommandContext ctx, IReadOnlyList<string> args)
+    {
+        if (args.Count < 2)
+        {
+            await Error(ctx, "ERR wrong number of arguments for 'rpushx' command");
+            return;
+        }
+
+        string key = args[0];
+        var values = args.Skip(1).ToArray();
+
+        int newLength = Store.RPushX(key, values, persist: true);
+
+        await ctx.Writer.WriteAsync(RespValue.Integer(newLength));
     }
 
     private static async Task LPopAsync(CommandContext ctx, IReadOnlyList<string> args)
