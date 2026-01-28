@@ -490,20 +490,48 @@ public sealed partial class InMemoryStore : IDisposable
         return value;
     }
 
-    public bool HDel(string key, string field, bool persist = true)
+    //public bool HDel(string key, string field, bool persist = true)
+    //{
+    //    var entry = GetEntry(key) as HashEntry;
+    //    if (entry == null) return false;
+
+    //    bool deleted = entry.Fields.Remove(field);
+
+    //    if (deleted && entry.Fields.Count == 0)
+    //        _data.TryRemove(key, out _);
+
+    //    if (persist && deleted)
+    //        _aof.AppendCommand("HDEL", key, field);
+
+    //    return deleted;
+    //}
+    public int HDel(string key, string[] fields, bool persist = true)
     {
         var entry = GetEntry(key) as HashEntry;
-        if (entry == null) return false;
+        if (entry == null)
+            return 0;
 
-        bool deleted = entry.Fields.Remove(field);
+        int deletedCount = 0;
 
-        if (deleted && entry.Fields.Count == 0)
+        foreach (string field in fields)
+        {
+            if (entry.Fields.Remove(field))
+                deletedCount++;
+        }
+
+        // Clean up empty hash
+        if (entry.Fields.Count == 0)
             _data.TryRemove(key, out _);
 
-        if (persist && deleted)
-            _aof.AppendCommand("HDEL", key, field);
+        // Persist full command once (same pattern as LPUSH/RPUSH)
+        if (persist && deletedCount > 0)
+        {
+            var fullArgs = new List<string> { key };
+            fullArgs.AddRange(fields);
+            _aof.AppendCommand("HDEL", fullArgs.ToArray());
+        }
 
-        return deleted;
+        return deletedCount;
     }
 
     public long HLen(string key)

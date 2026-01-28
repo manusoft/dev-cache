@@ -242,8 +242,15 @@ public sealed class AofPersistence : IDisposable
                         loaded++;
                         break;
 
-                    case "HDEL" when commandArgs.Count == 3:
-                        _store.HDel(commandArgs[1], commandArgs[2], persist: false);
+                    case "HDEL" when commandArgs.Count >= 3:
+                        string keyDel = commandArgs[1];
+
+                        for (int j = 2; j < commandArgs.Count; j++)
+                        {
+                            string fieldDel = commandArgs[j];
+                            _store.HDel(keyDel, new[] { fieldDel }, persist: false);
+                        }
+
                         loaded++;
                         break;
 

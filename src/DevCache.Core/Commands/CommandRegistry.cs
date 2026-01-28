@@ -1085,14 +1085,18 @@ public static class CommandRegistry
 
     private static async Task HDelAsync(CommandContext ctx, IReadOnlyList<string> args)
     {
-        if (args.Count != 2)
+        if (args.Count < 2)
         {
             await Error(ctx, "ERR wrong number of arguments for 'hdel' command");
             return;
         }
 
-        bool deleted = Store.HDel(args[0], args[1], persist: true);
-        await ctx.Writer.WriteAsync(RespValue.Integer(deleted ? 1 : 0));
+        string key = args[0];
+        var fields = args.Skip(1).ToArray();
+
+        int deleted = Store.HDel(key, fields, persist: true);
+
+        await ctx.Writer.WriteAsync(RespValue.Integer(deleted));
     }
 
     private static async Task HLenAsync(CommandContext ctx, IReadOnlyList<string> args)
