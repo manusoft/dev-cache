@@ -1,6 +1,7 @@
 ﻿using DevCache.Cli.Handlers;
 using DevCache.Common;
 using System.CommandLine;
+using System.CommandLine.Parsing;
 using System.Net.Sockets;
 using System.Numerics;
 using System.Text;
@@ -310,7 +311,7 @@ internal class Program
             Console.Write("Are you sure? Type 'YES' to confirm: ");
             Console.ResetColor();
 
-            string confirmation = Console.ReadLine()?.Trim().ToUpperInvariant();
+            string? confirmation = Console.ReadLine()?.Trim().ToUpperInvariant();
 
             if (confirmation != "YES")
             {
@@ -325,8 +326,17 @@ internal class Program
             Console.ResetColor();
         }
 
-        // Build and send RESP request
-        var respItems = parts.Select(RespValue.BulkString).ToList();
+        // Build RESP request
+        var respItems = new List<RespValue>();
+
+        respItems.Add(RespValue.BulkString(parts[0])); // command
+
+        for (int i = 1; i < parts.Count; i++)
+        {
+            string val = parts[i];
+            respItems.Add(RespValue.BulkString(val));
+        }
+
         var request = RespValue.Array(respItems.AsReadOnly());
 
         await _writer.WriteAsync(request, ct);
@@ -471,34 +481,74 @@ internal class Program
     private static List<string> SplitCommandLine(string line)
     {
         var result = new List<string>();
-        var sb = new StringBuilder();
+        var current = new StringBuilder();
         bool inQuotes = false;
+        bool escaped = false;
 
-        for (int i = 0; i < line.Length; i++)
+        int i = 0;
+        while (i < line.Length)
         {
             char c = line[i];
-            if (c == '"' && (i == 0 || line[i - 1] != '\\'))
+
+            if (escaped)
+            {
+                current.Append(c);
+                escaped = false;
+                i++;
+                continue;
+            }
+
+            if (c == '\\')
+            {
+                escaped = true;
+                i++;
+                continue;
+            }
+
+            if (c == '"')
             {
                 inQuotes = !inQuotes;
+                i++;
+
+                // If we just closed quotes...
+                if (!inQuotes)
+                {
+                    // Add whatever is in current (even empty)
+                    string token = current.ToString();
+                    result.Add(token);
+                    current.Clear();
+                }
                 continue;
             }
 
             if (c == ' ' && !inQuotes)
             {
-                if (sb.Length > 0)
+                // Add current token if any
+                if (current.Length > 0)
                 {
-                    result.Add(sb.ToString());
-                    sb.Clear();
+                    string token = current.ToString();
+                    result.Add(token);
+                    current.Clear();
                 }
+                // Skip extra spaces
+                while (i < line.Length && line[i] == ' ')
+                    i++;
+                continue;
             }
-            else
-            {
-                sb.Append(c);
-            }
+
+            current.Append(c);
+            i++;
         }
 
-        if (sb.Length > 0)
-            result.Add(sb.ToString());
+        // Add last token (could be empty if ended with quotes)
+        if (current.Length > 0 || (line.EndsWith("\"") && inQuotes == false))
+        {
+            string last = current.ToString();
+            result.Add(last);
+        }
+
+        // Remove only completely whitespace tokens (keep "")
+        result.RemoveAll(s => string.IsNullOrWhiteSpace(s) && s != "");
 
         return result;
     }
@@ -541,8 +591,14 @@ internal class Program
                 break;
 
             case RespType.BulkString:
+                string display = resp.Value switch
+                {
+                    null => "(nil)",
+                    "" => "(empty string)",
+                    _ => $"\"{resp.Value}\""
+                };
                 Console.ForegroundColor = ConsoleColor.White;
-                Console.WriteLine(resp.Value is null ? "(nil)" : $"\"{resp.Value}\"");
+                Console.WriteLine(display);
                 Console.ResetColor();
                 break;
 
