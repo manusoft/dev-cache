@@ -3,7 +3,7 @@
 ![Static Badge](https://img.shields.io/badge/ManuHub.Memora.Client-red)
 ![NuGet Version](https://img.shields.io/nuget/v/ManuHub.Memora.Client)
 ![NuGet Downloads](https://img.shields.io/nuget/dt/ManuHub.Memora.Client)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE.txt)
 
 <img width="512" height="512" alt="Memora Icon" src="https://github.com/user-attachments/assets/a4153c53-05f0-4458-9906-f7dfb18d959d" />
 
