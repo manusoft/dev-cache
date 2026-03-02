@@ -1,8 +1,8 @@
-# DevCache
+# Memora
 
-<img width="256" height="256" alt="Square44x44Logo altform-unplated_targetsize-256" src="https://github.com/user-attachments/assets/753eb77a-e251-4e35-abcf-a1ab268a6b6e" />
+<img width="512" height="512" alt="Design a product lan (Custom)" src="https://github.com/user-attachments/assets/0ae7f4b4-c6b0-41b9-8bcf-2111e7aaa478" />
 
-DevCache is a lightweight, Redis-inspired in-memory data store built for **learning, experimentation, and developer-focused caching**. It implements a subset of Redis semantics with a strong emphasis on **correct behavior, clean architecture, and protocol compatibility**.
+Memora is a lightweight, Redis-inspired in-memory data store built for **learning, experimentation, and developer-focused caching**. It implements a subset of Redis semantics with a strong emphasis on **correct behavior, clean architecture, and protocol compatibility**.
 
 This project is intentionally designed to explore *how Redis works internally* — not just at the command level, but across networking, persistence, expiry, and tooling.
 
@@ -101,7 +101,7 @@ Each layer is isolated:
 
 ## 💾 Persistence Model
 
-DevCache uses an **Append-Only File (AOF)** similar to Redis:
+Memora uses an **Append-Only File (AOF)** similar to Redis:
 
 * Every mutating command is appended in RESP format
 * On startup, the AOF is replayed to reconstruct state
@@ -153,9 +153,9 @@ dotnet run --project DevCache.Cli SET foo bar
 
 ---
 
-## 📚 Why DevCache?
+## 📚 Why Memora?
 
-DevCache exists to answer one question:
+Memora exists to answer one question:
 
 > *How does Redis actually work under the hood?*
 
@@ -165,7 +165,7 @@ This project explores protocol handling, concurrency, expiry, persistence, and t
 
 ## ⚠️ Disclaimer
 
-DevCache is **not intended as a Redis replacement**. It is a learning-focused project and a demonstration of systems design principles. It implements a compatible wire protocol for development purposes.
+Memora is **not intended as a Redis replacement**. It is a learning-focused project and a demonstration of systems design principles. It implements a compatible wire protocol for development purposes.
 
 ---
 
