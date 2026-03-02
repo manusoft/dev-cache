@@ -1,0 +1,36 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+	<RootNamespace>ManuHub.Memora</RootNamespace>
+	<AssemblyName>memora-cli</AssemblyName>
+	<ApplicationIcon>appicon.ico</ApplicationIcon>
+	<Copyright>Manuhub © 2026</Copyright>
+	<Description>Memora Command Line Interface</Description>
+	<PublishSingleFile>true</PublishSingleFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="appicon.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ReadLine" Version="2.0.1" />
+    <PackageReference Include="System.CommandLine" Version="2.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Memora.Common\Memora.Common.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="appicon.ico">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+  </ItemGroup>
+
+</Project>

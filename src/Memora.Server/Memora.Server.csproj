@@ -1,0 +1,25 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+	<RootNamespace>ManuHub.Memora</RootNamespace>
+	<AssemblyName>memora-server</AssemblyName>
+    <UserSecretsId>Manuhub-Memora.Server-7ce3fe59-d258-4b88-bd83-88d58ef3a173</UserSecretsId>
+	<PublishSingleFile>true</PublishSingleFile>
+	<ApplicationIcon>appicon.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="appicon.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Memora.Core\Memora.Core.csproj" />
+  </ItemGroup>
+</Project>
