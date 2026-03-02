@@ -1,4 +1,8 @@
-﻿Here is a practical plan + starter code to create your own **Memora CLI** — very similar in feel and usage to `redis-cli`, but tailored to your `Memora` server (port 6380 by default, RESP protocol, same commands).
+# Memora CLI
+
+<img width="512" height="512" alt="memora_icon (Custom)" src="https://github.com/user-attachments/assets/a4153c53-05f0-4458-9906-f7dfb18d959d" />
+ 
+ Here is a practical plan + starter code to create your own **Memora CLI** — very similar in feel and usage to `redis-cli`, but tailored to your `Memora` server (port 6380 by default, RESP protocol, same commands).
 
 ### Goals for the CLI
 - Interactive REPL style: type `SET key value`, `GET key`, `KEYS *`, `PING`, etc.
