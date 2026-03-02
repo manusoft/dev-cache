@@ -2,292 +2,226 @@
 
 <img width="512" height="512" alt="memora_icon (Custom)" src="https://github.com/user-attachments/assets/a4153c53-05f0-4458-9906-f7dfb18d959d" />
  
- Here is a practical plan + starter code to create your own **Memora CLI** — very similar in feel and usage to `redis-cli`, but tailored to your `Memora` server (port 6380 by default, RESP protocol, same commands).
+**Memora CLI** is the command-line client for **Memora**, a lightweight Redis-compatible in-memory data store. It allows developers to interact with the Memora server using an interactive shell (REPL) or single-command execution mode.
 
-### Goals for the CLI
-- Interactive REPL style: type `SET key value`, `GET key`, `KEYS *`, `PING`, etc.
-- Supports multi-line / quoted arguments (basic version first)
-- Connects to configurable host:port
-- Shows errors nicely
-- Exit with `exit` or `quit` or Ctrl+C
-- Later: history, tab completion, pipe support, scripting mode (`memora-cli -f script.txt`)
+The CLI is designed for simplicity, fast debugging, and scripting during development.
 
-### Project Setup
-Create a new console project inside your solution:
+---
 
-```bash
-dotnet new console -n Memora.Cli
-dotnet sln add Memora.Cli/Memora.Cli.csproj
-```
+## Features
 
-Add project reference to your core library (so you can reuse `RespReader` and `RespWriter`):
+* Interactive REPL mode
+* One-shot command execution
+* Redis-style command syntax
+* TCP connection to Memora server
+* Lightweight and fast startup
+* Script-friendly output
 
-```bash
-cd Memora.Cli
-dotnet add reference ../Memora.Core/Memora.Core.csproj
-```
+---
 
-(If you don't want to depend on the full core, you can copy `RespReader.cs`, `RespWriter.cs`, `RespValue.cs`, `RespType.cs` into the CLI project — they are small.)
+## Requirements
 
-### Minimal Working CLI (start here)
+* [.NET SDK](https://dotnet.microsoft.com/) (recommended .NET 8 or later)
+* Running Memora Server instance
 
-Put this in `Program.cs`:
+---
 
-```csharp
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Net.Sockets;
-using System.Text;
-using System.Threading.Tasks;
-using ManuHub.Memora; // ← from Memora.Core (RespReader, RespWriter, RespValue)
+## Build
 
-namespace Memora.Cli
-{
-    class Program
-    {
-        static async Task Main(string[] args)
-        {
-            string host = "127.0.0.1";
-            int port = 6380;
-
-            // Very basic arg parsing (later use System.CommandLine or similar)
-            if (args.Length >= 1) host = args[0];
-            if (args.Length >= 2 && int.TryParse(args[1], out int p)) port = p;
-
-            Console.WriteLine($"Memora CLI  v0.1  connecting to {host}:{port}");
-            Console.WriteLine("Commands: SET, GET, DEL, EXISTS, EXPIRE, TTL, KEYS *, PING, ECHO, FLUSHDB, etc.");
-            Console.WriteLine("Type 'exit' or Ctrl+C to quit\n");
-
-            TcpClient? client = null;
-            NetworkStream? stream = null;
-            RespWriter? writer = null;
-            RespReader? reader = null;
-
-            try
-            {
-                client = new TcpClient();
-                await client.ConnectAsync(host, port);
-                stream = client.GetStream();
-                writer = new RespWriter();
-                reader = new RespReader(stream);
-
-                while (true)
-                {
-                    Console.Write($"{host}:{port}> ");
-                    string? input = Console.ReadLine()?.Trim();
-
-                    if (string.IsNullOrWhiteSpace(input))
-                        continue;
-
-                    if (input.Equals("exit", StringComparison.OrdinalIgnoreCase) ||
-                        input.Equals("quit", StringComparison.OrdinalIgnoreCase))
-                        break;
-
-                    var parts = SplitCommandLine(input);
-                    if (parts.Count == 0) continue;
-
-                    string cmd = parts[0].ToUpperInvariant();
-                    var cmdArgs = parts.Skip(1).ToList();
-
-                    // Build RESP array: *N \r\n $len\r\n cmd \r\n $len\r\n arg1 \r\n ...
-                    var respItems = new List<RespValue> { RespValue.Bulk(cmd) };
-                    respItems.AddRange(cmdArgs.Select(RespValue.Bulk));
-
-                    var request = RespValue.Array(respItems.AsReadOnly());
-
-                    await writer.WriteAsync(stream, request);
-
-                    var response = await reader.ReadAsync();
-                    PrintResponse(response);
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Connection error: {ex.Message}");
-            }
-            finally
-            {
-                stream?.Dispose();
-                client?.Dispose();
-                Console.WriteLine("Bye.");
-            }
-        }
-
-        // Naive splitting — doesn't handle quotes yet
-        private static List<string> SplitCommandLine(string line)
-        {
-            return line.Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                       .Select(s => s.Trim())
-                       .ToList();
-        }
-
-        private static void PrintResponse(RespValue? resp)
-        {
-            if (resp == null)
-            {
-                Console.WriteLine("(nil)");
-                return;
-            }
-
-            switch (resp.Type)
-            {
-                case RespType.SimpleString:
-                    Console.WriteLine((string)resp.Value!);
-                    break;
-
-                case RespType.Error:
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine($"ERR {(string)resp.Value!}");
-                    Console.ResetColor();
-                    break;
-
-                case RespType.Integer:
-                    Console.WriteLine($"(integer) {(long)resp.Value!}");
-                    break;
-
-                case RespType.Bulk:
-                    var str = (string?)resp.Value;
-                    Console.WriteLine(str ?? "(nil)");
-                    break;
-
-                case RespType.Array:
-                    var items = (IReadOnlyList<RespValue>)resp.Value!;
-                    if (items.Count == 0)
-                    {
-                        Console.WriteLine("(empty list or set)");
-                    }
-                    else
-                    {
-                        for (int i = 0; i < items.Count; i++)
-                        {
-                            Console.WriteLine($"{i + 1}) {RespValueToString(items[i])}");
-                        }
-                    }
-                    break;
-
-                case RespType.Null:
-                    Console.WriteLine("(nil)");
-                    break;
-
-                default:
-                    Console.WriteLine($"[unsupported type: {resp.Type}]");
-                    break;
-            }
-        }
-
-        private static string RespValueToString(RespValue v)
-        {
-            return v.Type switch
-            {
-                RespType.Bulk => (string?)v.Value ?? "(nil)",
-                RespType.SimpleString => (string)v.Value!,
-                RespType.Integer => v.Value!.ToString()!,
-                RespType.Null => "(nil)",
-                _ => $"<{v.Type}>"
-            };
-        }
-    }
-}
-```
-
-### Quick Improvements (do these next)
-
-1. **Better argument splitting** (handle quoted strings)
-
-   Replace `SplitCommandLine` with something like:
-
-   ```csharp
-   private static List<string> SplitCommandLine(string line)
-   {
-       var result = new List<string>();
-       var current = new StringBuilder();
-       bool inQuotes = false;
-
-       for (int i = 0; i < line.Length; i++)
-       {
-           char c = line[i];
-           if (c == '"' && (i == 0 || line[i-1] != '\\'))
-           {
-               inQuotes = !inQuotes;
-               continue;
-           }
-           if (c == ' ' && !inQuotes)
-           {
-               if (current.Length > 0)
-               {
-                   result.Add(current.ToString());
-                   current.Clear();
-               }
-           }
-           else
-           {
-               current.Append(c);
-           }
-       }
-       if (current.Length > 0)
-           result.Add(current.ToString());
-
-       return result;
-   }
-   ```
-
-2. **Connection options** (host/port via flags)
-
-   Use `System.CommandLine` NuGet for proper CLI parsing:
-
-   ```bash
-   dotnet add package System.CommandLine
-   ```
-
-   Then wrap the logic in commands.
-
-3. **History** → add `dotnet add package ReadLine` (very small library)
-
-   ```csharp
-   using ReadLine; // after install
-
-   // In loop:
-   string? input = ReadLine.Read($"{host}:{port}> ");
-   ReadLine.AddHistory(input);
-   ```
-
-4. **Pipeline / scripting mode** later
-
-   - `-f file.txt` → read lines from file and execute
-   - `-x` → execute one command and exit (good for scripts)
-
-### Testing it right now
-
-Run your server (`Memora.Server` or `Memora.Service`), then:
+Clone the repository from GitHub:
 
 ```bash
-dotnet run --project Memora.Cli -- 127.0.0.1 6380
+git clone https://github.com/manusoft/Memora.git
+cd Memora
 ```
 
-Try:
+Build the CLI:
 
-```
-PING
-SET hello world
-GET hello
-KEYS *
-EXPIRE hello 60
-TTL hello
-FLUSHDB
+```bash
+dotnet build src/Memora.Cli
 ```
 
-You should get familiar output.
+---
 
-### Next Level (if you want to go further)
+## Run
 
-- Colorize output (green OK, red ERR, cyan integers, etc.)
-- Show `(integer) 3` style like redis-cli for counts
-- Add command help (`HELP SET`)
-- Support inline multi-line (like redis-cli --pipe)
-- Publish as .NET global tool: `dotnet tool install -g Memora.Cli`
+### Interactive Mode (REPL)
 
-Start with the code above — it should already feel very close to `redis-cli` for your current string-only server.
+```bash
+dotnet run --project src/Memora.Cli
+```
 
-Let me know what part you'd like to improve first (quoting, history, colors, global tool, etc.) and I can give the exact next snippet.
+Example session:
+
+```
+memora-cli> KEYS
+  1) sample_session:234567890
+  2) sample_session:123456789
+  3) sample_jobQueue:waitingList
+  4) sample_session:345678901
+  5) sample_session:901234567
+  6) sample_session:778899001
+  7) sample_session:678901234
+  8) sample_session:112233445
+  9) sample_jobQueue:ticket:101
+  10) sample_jobQueue:ticket:102
+  11) sample_jobQueue:ticket:103
+  12) sample_session:456789012
+  13) sample_session:890123456
+  14) sample_session:012345678
+  15) sample_session:567890123
+  16) sample_session:990011223
+  17) sample_session:789012345
+  18) sample_session:334455667
+  19) sample_session:556677889
+memora-cli> SET name "Memora"
+"OK"
+memora-cli> GET name
+"Memora"
+```
+
+---
+
+### One-Shot Mode
+
+Run a single command directly:
+
+```bash
+dotnet run --project src/Memora.Cli SET foo bar
+```
+
+Example:
+
+```
+OK
+```
+
+This mode is useful for:
+
+* automation scripts
+* CI pipelines
+* quick debugging
+
+---
+
+## Connection Options
+
+Default connection:
+
+```
+127.0.0.1:6380
+```
+
+If supported by your implementation, host and port may be passed:
+
+```bash
+memora-cli --host 127.0.0.1 --port 6380
+```
+
+---
+
+## Supported Commands
+
+Memora CLI forwards commands directly to the Memora server. Supported commands depend on server implementation but typically include:
+
+### Strings
+
+* `SET`
+* `GET`
+* `DEL`
+* `EXISTS`
+* `INCR`
+* `INCRBY`
+
+### TTL
+
+* `EXPIRE`
+* `TTL`
+* `PTTL`
+
+### Lists
+
+* `LPUSH`
+* `RPUSH`
+* `LPOP`
+* `RPOP`
+* `LLEN`
+
+### Hashes
+
+* `HSET`
+* `HGET`
+* `HDEL`
+
+### Server
+
+* `INFO`
+* `FLUSHDB`
+* `FLUSHALL`
+
+---
+
+## Example Workflow
+
+Start Memora server:
+
+```bash
+dotnet run --project src/Memora.Server
+```
+
+Open CLI:
+
+```bash
+dotnet run --project src/Memora.Cli
+```
+
+Run commands:
+
+```
+SET user:1 "Manoj"
+GET user:1
+```
+
+---
+
+## CLI Architecture
+
+```
+User Input
+   ↓
+Command Parser
+   ↓
+RESP Client
+   ↓
+Memora Server
+```
+
+The CLI communicates using the Redis RESP protocol and does not directly depend on internal server classes, making it suitable for testing and external tooling.
+
+---
+
+## Development
+
+Built using **.NET** from Microsoft.
+
+Run in development mode:
+
+```bash
+dotnet run --project src/Memora.Cli
+```
+
+---
+
+## Future Improvements (Suggested)
+
+* Command auto-completion
+* Syntax highlighting
+* Command history persistence
+* JSON output mode
+* Script file execution (`memora run script.mem`)
+
+---
+
+## License
+
+MIT License
