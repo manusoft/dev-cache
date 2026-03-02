@@ -1,5 +1,10 @@
 # Memora
 
+![Static Badge](https://img.shields.io/badge/ManuHub.Memora.Client-red)
+![NuGet Version](https://img.shields.io/nuget/v/ManuHub.Memora.Client)
+![NuGet Downloads](https://img.shields.io/nuget/dt/ManuHub.Memora.Client)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE.txt)
+
 <img width="512" height="512" alt="Design a product lan (Custom)" src="https://github.com/user-attachments/assets/0ae7f4b4-c6b0-41b9-8bcf-2111e7aaa478" />
 
 Memora is a lightweight, Redis-inspired in-memory data store built for **learning, experimentation, and developer-focused caching**. It implements a subset of Redis semantics with a strong emphasis on **correct behavior, clean architecture, and protocol compatibility**.
