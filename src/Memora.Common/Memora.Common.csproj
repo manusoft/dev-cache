@@ -1,8 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
+	<LangVersion>latest</LangVersion>
     <AssemblyName>memora-common</AssemblyName>
     <RootNamespace>ManuHub.Memora.Common</RootNamespace>
     <Nullable>enable</Nullable>

@@ -5,10 +5,6 @@
     <Project Path="src/Memora.Common/Memora.Common.csproj" />
     <Project Path="src/Memora.Core/Memora.Core.csproj" />
     <Project Path="src/Memora.Server/Memora.Server.csproj" />
-    <Project Path="src/Memora.UI/Memora.UI.csproj" Id="2194a7f5-6059-4bbc-92f1-efd3ddcd57e3">
-      <Platform Project="x64" />
-      <Deploy />
-    </Project>
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Memora.Tests/Memora.Tests.csproj" Id="3c53b764-310f-4731-8ad6-6fe87a460b04" />

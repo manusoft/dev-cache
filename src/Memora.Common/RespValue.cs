@@ -2,7 +2,7 @@
 
 /// <summary>
 /// High-level RESP value representation used by both reader and writer.
-/// Supports all Redis-compatible RESP2 types used in DevCache.
+/// Supports all Redis-compatible RESP2 types used in Memora.
 /// </summary>
 public sealed class RespValue
 {

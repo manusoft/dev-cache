@@ -1,15 +1,21 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <OutputType>Exe</OutputType>
+  <PropertyGroup>    
     <TargetFramework>net10.0</TargetFramework>
+	<OutputType>Exe</OutputType>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
 	<RootNamespace>ManuHub.Memora</RootNamespace>
 	<AssemblyName>memora-cli</AssemblyName>
-	<ApplicationIcon>appicon.ico</ApplicationIcon>
-	<Copyright>Manuhub © 2026</Copyright>
+
+	<ProductName>Memora CLI</ProductName>
+	<Authors>Manojbabu</Authors>
+	<Company>ManuHub</Company>
+	<Copyright>Copyright © $([System.DateTime]::Now.Year) ManuHub</Copyright>
 	<Description>Memora Command Line Interface</Description>
+	<Version>1.0.0</Version>
+	  
+	<ApplicationIcon>appicon.ico</ApplicationIcon>	
 	<PublishSingleFile>true</PublishSingleFile>
   </PropertyGroup>
 

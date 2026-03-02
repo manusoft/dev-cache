@@ -1,4 +1,4 @@
-﻿Here is a practical plan + starter code to create your own **DevCache CLI** — very similar in feel and usage to `redis-cli`, but tailored to your `DevCache` server (port 6380 by default, RESP protocol, same commands).
+﻿Here is a practical plan + starter code to create your own **Memora CLI** — very similar in feel and usage to `redis-cli`, but tailored to your `Memora` server (port 6380 by default, RESP protocol, same commands).
 
 ### Goals for the CLI
 - Interactive REPL style: type `SET key value`, `GET key`, `KEYS *`, `PING`, etc.
@@ -52,7 +52,7 @@ namespace Memora.Cli
             if (args.Length >= 1) host = args[0];
             if (args.Length >= 2 && int.TryParse(args[1], out int p)) port = p;
 
-            Console.WriteLine($"DevCache CLI  v0.1  connecting to {host}:{port}");
+            Console.WriteLine($"Memora CLI  v0.1  connecting to {host}:{port}");
             Console.WriteLine("Commands: SET, GET, DEL, EXISTS, EXPIRE, TTL, KEYS *, PING, ECHO, FLUSHDB, etc.");
             Console.WriteLine("Type 'exit' or Ctrl+C to quit\n");
 
@@ -256,10 +256,10 @@ namespace Memora.Cli
 
 ### Testing it right now
 
-Run your server (`DevCache.Server` or `DevCache.Service`), then:
+Run your server (`Memora.Server` or `Memora.Service`), then:
 
 ```bash
-dotnet run --project DevCache.Cli -- 127.0.0.1 6380
+dotnet run --project Memora.Cli -- 127.0.0.1 6380
 ```
 
 Try:
@@ -282,7 +282,7 @@ You should get familiar output.
 - Show `(integer) 3` style like redis-cli for counts
 - Add command help (`HELP SET`)
 - Support inline multi-line (like redis-cli --pipe)
-- Publish as .NET global tool: `dotnet tool install -g DevCache.Cli`
+- Publish as .NET global tool: `dotnet tool install -g Memora.Cli`
 
 Start with the code above — it should already feel very close to `redis-cli` for your current string-only server.
 

@@ -39,8 +39,8 @@ public class InfoCommandHandler
         var uptime = DateTime.UtcNow - _runtime.StartedAt;
 
         sb.AppendLine("# Server");
-        sb.AppendLine("devcache_version:0.3.0");           // change when you tag releases
-        sb.AppendLine("devcache_mode:standalone");
+        sb.AppendLine("memora_version:0.3.0");           // change when you tag releases
+        sb.AppendLine("memora_mode:standalone");
         sb.AppendLine($"process_id:{Environment.ProcessId}");
         sb.AppendLine($"tcp_port:{_runtime.Port}");
         sb.AppendLine($"uptime_in_seconds:{(long)uptime.TotalSeconds}");

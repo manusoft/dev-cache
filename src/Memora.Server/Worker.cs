@@ -11,12 +11,12 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration) : Back
         try
         {
             await server.StartAsync(stoppingToken);
-            logger.LogInformation("DevCache server stopped gracefully");
+            logger.LogInformation("Memora server stopped gracefully");
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            logger.LogCritical(ex, "DevCache failed");
+            logger.LogCritical(ex, "Memora failed");
             throw;
         }
         finally

@@ -45,8 +45,8 @@ public sealed partial class InMemoryStore : IDisposable
     {
         string aofPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "DevCache",
-            "devcache.aof"
+            "Memora",
+            "memora.aof"
         );
 
         Directory.CreateDirectory(Path.GetDirectoryName(aofPath)!);

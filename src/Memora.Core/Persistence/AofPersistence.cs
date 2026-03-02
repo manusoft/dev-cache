@@ -307,7 +307,7 @@ public sealed class AofPersistence : IDisposable
             AutoFlush = false
         };
 
-        _aofWriter.WriteLine($"# DevCache AOF started {DateTime.UtcNow:o}");
+        _aofWriter.WriteLine($"# Memora AOF started {DateTime.UtcNow:o}");
     }
 
     private async Task AofRewriteMonitorLoop()
@@ -352,7 +352,7 @@ public sealed class AofPersistence : IDisposable
             using var tempFs = new FileStream(tempPath, FileMode.Create, FileAccess.Write);
             using var tempWriter = new StreamWriter(tempFs, Encoding.UTF8);
 
-            tempWriter.WriteLine($"# DevCache AOF rewritten {DateTime.UtcNow:o}");
+            tempWriter.WriteLine($"# Memora AOF rewritten {DateTime.UtcNow:o}");
 
             var now = DateTimeOffset.UtcNow;
             foreach (var kvp in _store.GetAllEntries())
@@ -486,7 +486,7 @@ public sealed class AofPersistence : IDisposable
 
             using var fs = new FileStream(_aofPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite);
             using var writer = new StreamWriter(fs, Encoding.UTF8);
-            writer.WriteLine($"# DevCache AOF flushed & restarted {DateTime.UtcNow:o}");
+            writer.WriteLine($"# Memora AOF flushed & restarted {DateTime.UtcNow:o}");
         }
 
         OpenWriter();
