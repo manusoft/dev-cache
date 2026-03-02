@@ -1,11 +1,48 @@
-# Memora – In-Memory Cache for .NET
+# Memora.Client
 
-[![NuGet](https://img.shields.io/nuget/v/Memora.Client.svg)](https://www.nuget.org/packages/Memora.Client/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+![Static Badge](https://img.shields.io/badge/ManuHub.Memora.Client-red)
+![NuGet Version](https://img.shields.io/nuget/v/ManuHub.Memora.Client)
+![NuGet Downloads](https://img.shields.io/nuget/dt/ManuHub.Memora.Client)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE.txt)
 
 <img width="512" height="512" alt="Memora Icon" src="https://github.com/user-attachments/assets/a4153c53-05f0-4458-9906-f7dfb18d959d" />
 
-Memora is a **high-performance, Redis-inspired in-memory cache** for .NET. It provides key/value storage, lists, hashes, TTL, and DB commands, with a **.NET client** ready for integration in ASP.NET Core, console apps, or background services.
+**Memora.Client** is a .NET library for interacting with a running **Memora server**. It provides a high-level API wrapper over the Memora protocol so you can use strongly-typed commands, handle responses cleanly, and integrate Memora into your applications with minimal boilerplate.
+
+It complements the **Memora CLI** and **Memora Server** by giving developers a programmatic client for caching, key/value operations, and data structure commands.
+
+---
+# ⭐ Why Memora package?
+
+Memora was created to solve a practical development issue:
+On **Microsoft Windows**, setting up a Redis-compatible environment often requires Docker, WSL, or external services. Many .NET developers prefer a lightweight native solution that runs directly on Windows.
+
+Memora provides a simple alternative by shipping a **native executable server** and a **.NET client library** designed for development and lightweight deployments.
+
+## Key Idea
+Memora runs as a **local executable**:
+
+```bash
+ memora-server.exe
+```
+
+So developers only need to:
+1. Download the release
+2. Run the server
+3. Use the client or CLI
+
+No Docker, WSL, or external infrastructure is required.
+
+---
+
+## Ideal Use Cases
+- Local development caching
+- Integration testing
+- Prototyping
+- Small production workloads
+- Offline development environments
+
+Memora is **not intended to replace large-scale Redis deployments**, but to provide a simple, **self-contained Redis-style environment** for Windows-focused development.
 
 ---
 
@@ -52,13 +89,13 @@ Memora is designed for **fast in-memory caching** with a simple API:
 Install the **client** via NuGet:
 
 ```bash
-dotnet add package Memora.Client --version 1.0.0
+dotnet add package ManuHub.Memora.Client --version 1.0.0
 ````
 
 Or add as a project reference:
 
 ```xml
-<ProjectReference Include="..\Memora.Client\Memora.Client.csproj" />
+<ProjectReference Include="ManuHub.Memora.Client" Version="1.0.0" />
 ```
 
 ---
@@ -181,11 +218,11 @@ public class CacheController : ControllerBase
 If using `Memora.Cli`:
 
 ```bash
-memora set name Alice
-memora get name
-memora lpush users Alice Bob
-memora hset user:1 name Alice age 25
-memora hgetall user:1
+memora-cli> set name Alice
+memora-cli> get name
+memora-cli> lpush users Alice Bob
+memora-cli> hset user:1 name Alice age 25
+memora-cli> hgetall user:1
 ```
 
 ---
@@ -200,7 +237,7 @@ memora hgetall user:1
 
 ---
 
-## License
+## 📜 License
 
-MIT License – see [LICENSE](LICENSE)
+MIT License – see [LICENSE](LICENSE.txt)
 

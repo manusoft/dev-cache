@@ -108,7 +108,7 @@ internal class Program
     {
         Console.ForegroundColor = ConsoleColor.DarkYellow;
         Console.WriteLine("Memora CLI v1.0.0");
-        Console.WriteLine("Copyright © Manuhub. All rights reserved.");
+        Console.WriteLine($"Copyright © {DateTime.UtcNow.Year} Manuhub. All rights reserved.");
         Console.ResetColor();
 
         // Try to auto-connect at startup
@@ -125,7 +125,7 @@ internal class Program
         else
         {
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine("Not connected. Use CONNECT <host> <port> to connect.");
+            Console.WriteLine($"Not connected. Use CONNECT <{_host}> <{_port}> to connect.");
             Console.ResetColor();
         }
 
@@ -139,9 +139,9 @@ internal class Program
 
         while (!ct.IsCancellationRequested)
         {
-            string status = IsConnected ? "[Connected]" : "[Not connected]";
+            string status = IsConnected ? "memora-cli" : $"[Not connected] {_host}:{_port}";
             Console.ForegroundColor = IsConnected ? ConsoleColor.Green : ConsoleColor.Red;
-            var line = ReadLine.Read($"{status} {_host}:{_port}> ")?.Trim();
+            var line = ReadLine.Read($"{status}> ")?.Trim();
             Console.ResetColor();
 
             if (string.IsNullOrWhiteSpace(line)) continue;
