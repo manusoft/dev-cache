@@ -13,6 +13,12 @@ This project is intentionally designed to explore *how Redis works internally* �
 
 ---
 
+## ⬇️ DOWNLOADS
+- [Windows](https://github.com/manusoft/Memora/releases/download/v1.0.0/memora-win-x64.zip)
+- [Linux](https://github.com/manusoft/Memora/releases/download/v1.0.0/memora-linux-x64.zip)
+
+---
+
 ## ✨ Features
 
 ### Core
