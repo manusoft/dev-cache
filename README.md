@@ -4,6 +4,7 @@
 ![NuGet Version](https://img.shields.io/nuget/v/ManuHub.Memora.Client)
 ![NuGet Downloads](https://img.shields.io/nuget/dt/ManuHub.Memora.Client)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE.txt)
+![Visitors](https://visitor-badge.laobi.icu/badge?page_id=manusoft/Memora)
 
 <img width="512" height="512" alt="Design a product lan (Custom)" src="https://github.com/user-attachments/assets/0ae7f4b4-c6b0-41b9-8bcf-2111e7aaa478" />
 
