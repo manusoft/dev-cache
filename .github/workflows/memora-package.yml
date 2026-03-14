@@ -21,9 +21,9 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      # 3️⃣ Restore dependencies
-      - name: Restore dependencies
-        run: dotnet restore
+      # 3️⃣ Restore dependencies (just for this project)
+      - name: Restore Memora.Client
+        run: dotnet restore src/Memora.Client/Memora.Client.csproj
 
       # 4️⃣ Pack the project
       - name: Pack NuGet package
