@@ -29,14 +29,16 @@ jobs:
         run: dotnet pack src/Memora.Client/Memora.Client.csproj -c Release --output ./nupkg
 
       - name: Publish to GitHub Packages
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           dotnet nuget push ./nupkg/*.nupkg \
-            --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
-            --api-key $GITHUB_TOKEN
+          --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
+          --api-key $GITHUB_TOKEN
 
       - name: Publish to nuget.org
+        shell: bash
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: |
