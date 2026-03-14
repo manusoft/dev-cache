@@ -1,4 +1,4 @@
-name: Publish Package
+name: Publish Memora.Client Package
 
 on:
   push:
@@ -11,25 +11,23 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      # 1️⃣ Checkout code
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2️⃣ Setup .NET
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
 
-      # 3️⃣ Restore dependencies (just for this project)
       - name: Restore Memora.Client
         run: dotnet restore src/Memora.Client/Memora.Client.csproj
 
-      # 4️⃣ Pack the project
-      - name: Pack NuGet package
+      - name: Build Memora.Client
+        run: dotnet build src/Memora.Client/Memora.Client.csproj -c Release
+
+      - name: Pack Memora.Client
         run: dotnet pack src/Memora.Client/Memora.Client.csproj -c Release --output ./nupkg
 
-      # 5️⃣ Publish to GitHub Packages
       - name: Publish to GitHub Packages
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -38,10 +36,9 @@ jobs:
             --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
             --api-key $GITHUB_TOKEN
 
-      # 6️⃣ Publish to nuget.org
       - name: Publish to nuget.org
         env:
-          NUGET_API_KEY: ${{ secrets.NUGET_KEY }}
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: |
           dotnet nuget push ./nupkg/*.nupkg \
             --source "https://api.nuget.org/v3/index.json" \
