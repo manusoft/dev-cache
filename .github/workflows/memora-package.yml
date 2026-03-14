@@ -35,7 +35,7 @@ jobs:
           if ($nupkg) {
               dotnet nuget push "$nupkg" `
                 --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" `
-                --api-key "${{ secrets.GITHUB_TOKEN }}" `
+                --api-key "${{ secrets.GH_KEY }}" `
                 --skip-duplicate
           } else {
               Write-Output "No .nupkg found – skipping GitHub Packages"
@@ -48,7 +48,7 @@ jobs:
           if ($nupkg) {
               dotnet nuget push "$nupkg" `
                 --source "https://api.nuget.org/v3/index.json" `
-                --api-key "${{ secrets.NUGET_API_KEY }}" `
+                --api-key "${{ secrets.NUGET_KEY }}" `
                 --skip-duplicate
           } else {
               Write-Output "No .nupkg found – skipping nuget.org"
