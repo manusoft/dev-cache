@@ -28,19 +28,6 @@ jobs:
       - name: Pack Memora.Client
         run: dotnet pack src/Memora.Client/Memora.Client.csproj -c Release --output ./nupkg
 
-      - name: Publish to GitHub Packages
-        shell: pwsh
-        run: |
-          $nupkg = Get-ChildItem "./nupkg" -Filter "*.nupkg" | Select-Object -First 1 -ExpandProperty FullName
-          if ($nupkg) {
-              dotnet nuget push "$nupkg" `
-                --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" `
-                --api-key "${{ secrets.GH_KEY }}" `
-                --skip-duplicate
-          } else {
-              Write-Output "No .nupkg found – skipping GitHub Packages"
-          }
-
       - name: Publish to nuget.org
         shell: pwsh
         run: |
